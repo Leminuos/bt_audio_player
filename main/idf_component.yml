@@ -1,0 +1,18 @@
+## IDF Component Manager Manifest File
+dependencies:
+  ## Required IDF version
+  idf:
+    version: '>=4.1.0'
+
+  ## LVGL Graphics Library
+  lvgl/lvgl: "^9.4.0"
+  espressif/esp_lvgl_port: ^2.3.0
+
+  ## ILI9341 LCD Driver
+  espressif/esp_lcd_ili9341: ^2.0.2
+
+  ## XPT2046 Touch Driver
+  min9802/esp_lcd_touch_xpt2046: "^1.0.0"
+
+  ## cJSON Library
+  espressif/cjson: "^1.0.0"
