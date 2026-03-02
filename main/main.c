@@ -10,10 +10,50 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/event_groups.h"
 
 static const char* TAG = "main";
 
+#define UI_EVENT_TRACK_CHANGED      BIT0
+#define UI_EVENT_TRACK_FINISHED     BIT1
+
+static EventGroupHandle_t s_audio_event_group;
+static TaskHandle_t s_audio_task;
+
 extern void ui_refresh_file_list(const char *dir_path);
+
+static void ui_audio_task(void* param)
+{
+    (void) param;
+    EventBits_t bits = 0;
+
+    for ( ; ; ) {
+        bits = xEventGroupWaitBits(s_audio_event_group,
+                                    UI_EVENT_TRACK_CHANGED | UI_EVENT_TRACK_FINISHED,
+                                    pdTRUE,
+                                    pdFALSE,
+                                    portMAX_DELAY);
+        
+        if (bits & UI_EVENT_TRACK_CHANGED) {
+            if (display_port_lock(100)) {
+                bt_audio_playback_pos_t p = {0};
+                bt_audio_get_position(&p);
+                lv_label_set_text_fmt(ui_lblTimeElapsed, "%02ld:%02ld",
+                                    ((p.position_ms / 1000) / 60),
+                                    ((p.position_ms / 1000) % 60));
+                lv_slider_set_value(ui_sliderProgress, p.progress_pct, LV_ANIM_ON);
+                display_port_unlock();
+            }
+        }
+
+        if (bits & UI_EVENT_TRACK_FINISHED) {
+            if (display_port_lock(100)) {
+                lv_label_set_text(ui_lblBtnPlayPause, LV_SYMBOL_PLAY);
+                display_port_unlock();
+            }
+        }
+    }
+}
 
 static void on_bt_event(const bt_audio_event_t *evt)
 {
@@ -29,11 +69,23 @@ static void on_bt_event(const bt_audio_event_t *evt)
                 ESP_LOGI(TAG, "Connected to: %s (%s)", info.name, info.bda_str);
             }
 
+            xTaskCreatePinnedToCore(ui_audio_task, "audio_task",
+                                    2048, NULL,
+                                    6, &s_audio_task, 1);
+            
             break;
         }
 
+        case BT_AUDIO_STATE_PLAYING:
+            break;
+
+        case BT_AUDIO_STATE_PAUSED:
+            break;
+
         case BT_AUDIO_STATE_DISCONNECTED:
             bt_audio_start_discovery(true);
+            vTaskDelete(s_audio_task);
+            s_audio_task = NULL;
             break;
 
         default:
@@ -43,20 +95,12 @@ static void on_bt_event(const bt_audio_event_t *evt)
     }
 
     case BT_AUDIO_EVT_DATA_UPDATE: {
-        // char time_elapsed[12] = {0};
-        // bt_audio_playback_pos_t p = {0};
-        // bt_audio_get_position(&p);
-        // snprintf(time_elapsed, sizeof(time_elapsed), "%02ld:%02ld",
-        //     ((p.position_ms / 1000) / 60),
-        //     ((p.position_ms / 1000) % 60));
-        // ESP_LOGI(TAG, "Time duration: %s", time_elapsed);
-        // lv_label_set_text(ui_lblTimeElapsed, time_elapsed);
-        // lv_slider_set_value(ui_sliderProgress, p.progress_pct, LV_ANIM_ON);
+        xEventGroupSetBits(s_audio_event_group, UI_EVENT_TRACK_CHANGED);
         break;
     }
     
     case BT_AUDIO_EVT_TRACK_FINISHED:
-        lv_label_set_text(ui_lblBtnPlayPause, LV_SYMBOL_PLAY);
+        xEventGroupSetBits(s_audio_event_group, UI_EVENT_TRACK_FINISHED);
         break;
 
     default:
@@ -66,7 +110,7 @@ static void on_bt_event(const bt_audio_event_t *evt)
 
 void app_main(void)
 {
-    
+    s_audio_event_group = xEventGroupCreate();
     bt_audio_init("esp32_player");
     bt_audio_register_callback(on_bt_event);
     bt_audio_start_discovery(true);
