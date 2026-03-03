@@ -36,13 +36,19 @@ void ui_bt_select_show_error(const char* msg) {
 static uint16_t s_count = 0;
 static bt_audio_discovered_dev_t * s_devs;
 
+extern lv_style_t style_item;
+extern lv_style_t style_item_pressed;
+extern lv_style_t style_rssi_good;
+extern lv_style_t style_rssi_medium;
+extern lv_style_t style_rssi_weak;
+
 static void cb_device_clicked(lv_event_t *e) {
     int idx = (int)(intptr_t)lv_event_get_user_data(e);
 
     if (idx < 0 || idx >= s_count) return;
 
     // Hiển thị trạng thái connecting
-    ui_bt_select_show_connecting(s_devs[idx]->name);
+    ui_bt_select_show_connecting(s_devs[idx].name);
 
     // Thực hiện kết nối BT
     bt_audio_connect_by_index(idx);
@@ -50,7 +56,7 @@ static void cb_device_clicked(lv_event_t *e) {
 
 void ui_refresh_bt_device_list(void) {
     bt_audio_discovery_get_count(&s_count);
-    s_devs = (bt_audio_discovered_dev_t*) malloc(s_count * sizoef(bt_audio_discovered_dev_t));
+    s_devs = (bt_audio_discovered_dev_t*) malloc(s_count * sizeof(bt_audio_discovered_dev_t));
     bt_audio_discovery_get_results(&s_count, s_devs);
 
     lv_obj_clean(panel_device_list);
@@ -62,7 +68,7 @@ void ui_refresh_bt_device_list(void) {
 
     char status_buf[32];
     snprintf(status_buf, sizeof(status_buf), "Found %d device(s)", s_count);
-    ui_bt_select_show_error(lbl_status, status_buf);
+    ui_bt_select_show_error(status_buf);
 
     for (int i = 0; i < s_count; i++) {
         // Bỏ qua device không có tên
@@ -94,8 +100,8 @@ void ui_refresh_bt_device_list(void) {
         lv_label_set_text_fmt(lbl_rssi, "%d", s_devs[i].rssi);
 
         // Màu RSSI theo cường độ tín hiệu
-        if (dev->rssi > -50) lv_obj_add_style(lbl_rssi, &style_rssi_good, 0);       // mạnh
-        else if (dev->rssi > -70) lv_obj_add_style(lbl_rssi, &style_rssi_medium, 0);// trung bình
+        if (s_devs[i].rssi > -50) lv_obj_add_style(lbl_rssi, &style_rssi_good, 0);       // mạnh
+        else if (s_devs[i].rssi > -70) lv_obj_add_style(lbl_rssi, &style_rssi_medium, 0);// trung bình
         else lv_obj_add_style(lbl_rssi, &style_rssi_weak, 0);                       // yếu
 
         lv_obj_add_event_cb(item, cb_device_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)i);

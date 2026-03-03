@@ -8,12 +8,13 @@ lv_obj_t *btn_rescan        = NULL;
 lv_obj_t *spinner           = NULL;   // loading animation
 
 // Styles
+lv_style_t style_item;
+lv_style_t style_item_pressed;
+lv_style_t style_rssi_good;
+lv_style_t style_rssi_medium;
+lv_style_t style_rssi_weak;
+
 static lv_style_t style_screen;
-static lv_style_t style_item;
-static lv_style_t style_item_pressed;
-static lv_style_t style_rssi_good;
-static lv_style_t style_rssi_medium;
-static lv_style_t style_rssi_weak;
 
 // ============================================================
 // Styles

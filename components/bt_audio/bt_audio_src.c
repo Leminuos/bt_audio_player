@@ -21,6 +21,7 @@
 #include "esp_bt_main.h"
 #include "esp_gap_bt_api.h"
 #include "esp_a2dp_api.h"
+#include "esp_avrc_api.h"
 
 static const char *TAG = "bt_audio";
 
@@ -54,6 +55,7 @@ static bool                         s_auto_connect  = false;
 static atomic_uint_fast32_t         s_bytes_played  = 0;
 static volatile uint8_t             s_volume        = 0;
 static volatile int                 s_state         = BT_AUDIO_STATE_IDLE;
+static volatile bool                s_remote_has_abs_vol = false;
 static bt_audio_device_info_t       s_device        = {0};
 static bt_audio_event_cb_t          s_event_cb      = NULL;
 static StreamBufferHandle_t         s_stream_buf    = NULL;
@@ -205,6 +207,8 @@ static const uint16_t s_vol_table[101] = {
 static void bt_apply_volume(uint8_t *buf, size_t len, uint32_t vol)
 {
     if (vol >= 100) return;
+
+    if (s_remote_has_abs_vol) return;
 
     uint16_t factor = s_vol_table[vol];
     if (factor == 0) {
@@ -573,13 +577,65 @@ static void bt_audio_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *
     }
 }
 
+/* ─── AVRCP Callback ─────────────────────────────────────────────────────── */
+
+static void bt_audio_avrc_cb(esp_avrc_ct_cb_event_t event, esp_avrc_ct_cb_param_t *p)
+{
+    switch (event) {
+
+    /* Remote device connected — check capabilities */
+    case ESP_AVRC_CT_CONNECTION_STATE_EVT:
+        if (p->conn_stat.connected) {
+            ESP_LOGI(TAG, "AVRCP connected");
+            /* Query remote features */
+            esp_avrc_ct_send_get_rn_capabilities_cmd(0);
+        } else {
+            ESP_LOGI(TAG, "AVRCP disconnected");
+            s_remote_has_abs_vol = false;
+        }
+        break;
+
+    /* Remote trả về capabilities */
+    case ESP_AVRC_CT_GET_RN_CAPABILITIES_RSP_EVT:
+        if (esp_avrc_rn_evt_bit_mask_operation(ESP_AVRC_BIT_MASK_OP_TEST,
+                                              &p->get_rn_caps_rsp.evt_set,
+                                              ESP_AVRC_RN_VOLUME_CHANGE)) {
+            s_remote_has_abs_vol = true;
+            ESP_LOGI(TAG, "Remote supports absolute volume");
+
+            /* Đăng ký notification khi remote tự đổi volume */
+            esp_avrc_ct_send_register_notification_cmd(1, ESP_AVRC_RN_VOLUME_CHANGE, 0);
+        }
+        else {
+            ESP_LOGW(TAG, "Remote does NOT support absolute volume, using software volume");
+        }
+
+        break;
+
+    /* Remote thay đổi volume (Ví dụ: user bấm nút trên tai nghe) */
+    case ESP_AVRC_CT_CHANGE_NOTIFY_EVT:
+        if (p->change_ntf.event_id == ESP_AVRC_RN_VOLUME_CHANGE) {
+            uint8_t vol_0_127 = p->change_ntf.event_parameter.volume;
+            uint8_t vol_pct   = (uint8_t)((uint32_t)vol_0_127 * 100 / 127);
+            ESP_LOGI(TAG, "Remote volume changed: %d/127 (%d%%)", vol_0_127, vol_pct);
+
+            /* Re-register notification cho lần thay đổi tiếp */
+            esp_avrc_ct_send_register_notification_cmd(1, ESP_AVRC_RN_VOLUME_CHANGE, 0);
+        }
+        break;
+
+    default:
+        break;
+    }
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════ */
 /*                              PUBLIC API                                    */
 /* ═══════════════════════════════════════════════════════════════════════════ */
 
 esp_err_t bt_audio_init(const char *device_name)
 {
-    esp_err_t ret;
+    esp_err_t ret = ESP_OK;
 
     /* 1. NVS */
     ret = nvs_flash_init();
@@ -602,24 +658,29 @@ esp_err_t bt_audio_init(const char *device_name)
     ESP_ERROR_CHECK(esp_bt_gap_register_callback(bt_audio_gap_cb));
     ESP_ERROR_CHECK(esp_a2d_register_callback(bt_audio_a2dp_cb));
 
-    /* 5. A2DP Source */
+    /* 5. AVRC profile */
+    ESP_ERROR_CHECK(esp_avrc_ct_init());
+    ESP_ERROR_CHECK(esp_avrc_ct_register_callback(bt_audio_avrc_cb));
+
+    /* 6. A2DP Source */
     ESP_ERROR_CHECK(esp_a2d_source_register_data_callback(bt_audio_a2dp_data_cb));
     ESP_ERROR_CHECK(esp_a2d_source_init());
 
-    /* 6. Device name & scan mode */
+    /* 7. Device name & scan mode */
     esp_bt_gap_set_device_name(device_name);
     esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
 
-    /* 7. SSP — No Input No Output (auto-accept) */
+    /* 8. SSP — No Input No Output (auto-accept) */
     esp_bt_sp_param_t sp_param = ESP_BT_SP_IOCAP_MODE;
     esp_bt_io_cap_t iocap = ESP_BT_IO_CAP_NONE;
     esp_bt_gap_set_security_param(sp_param, &iocap, sizeof(uint8_t));
 
-    /* 8. Reset state */
+    /* 9. Reset state */
     s_state      = BT_AUDIO_STATE_IDLE;
     s_volume     = 100;
     s_decoder    = NULL;
     s_disc_count = 0;
+    s_remote_has_abs_vol = false;
     atomic_store(&s_bytes_played, 0);
     atomic_store(&s_flags, 0);
     memset(&s_device, 0, sizeof(s_device));
@@ -629,7 +690,7 @@ esp_err_t bt_audio_init(const char *device_name)
 
     bt_set_state(BT_AUDIO_STATE_IDLE);
 
-    /* Đăng ký decoder interface */
+    /* 10. Đăng ký decoder interface */
     s_registry_count = 0;
     const char *wav_ext[] = {"wav"};
     bt_audio_register_decoder(&bt_audio_wav_decoder, wav_ext, 1);
@@ -637,7 +698,7 @@ esp_err_t bt_audio_init(const char *device_name)
     bt_audio_register_decoder(&bt_audio_raw_decoder, raw_ext, 2);
 
     ESP_LOGI(TAG, "BT Audio Source initialized: '%s'", device_name);
-    return ESP_OK;
+    return ret;
 }
 
 void bt_audio_register_callback(bt_audio_event_cb_t callback)
@@ -881,7 +942,17 @@ esp_err_t bt_audio_get_position(bt_audio_playback_pos_t *pos)
 void bt_audio_set_volume(uint8_t volume_pct)
 {
     if (volume_pct > 100) volume_pct = 100;
-    s_volume = volume_pct;
+
+    if (s_remote_has_abs_vol) {
+        /* Convert 0-100 → 0-127 (AVRCP range) */
+        uint8_t vol_0_127 = (uint8_t)((uint32_t)volume_pct * 127 / 100);
+        esp_avrc_ct_send_set_absolute_volume_cmd(0, vol_0_127);
+
+        s_volume = 100;
+    }
+    else {
+        s_volume = volume_pct;
+    }
 }
 
 uint8_t bt_audio_get_volume(void)
