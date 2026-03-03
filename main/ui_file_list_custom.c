@@ -153,9 +153,11 @@ static void cb_file_item_clicked(lv_event_t *e) {
 
     // Cập nhật UI player
     ui_is_playing = true;
+    uint8_t vol = bt_audio_get_volume();
     lv_label_set_text(ui_lblSongName, entry->name);
     lv_label_set_text(ui_lblBtnPlayPause, LV_SYMBOL_PAUSE);
     lv_slider_set_value(ui_sliderProgress, 0, LV_ANIM_OFF);
+    lv_slider_set_value(ui_sliderVolume, vol, LV_ANIM_ON);
 
     // Chuyển screen
     lv_scr_load_anim(ui_audioplayer, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);

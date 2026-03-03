@@ -587,6 +587,10 @@ static void bt_audio_avrc_cb(esp_avrc_ct_cb_event_t event, esp_avrc_ct_cb_param_
     case ESP_AVRC_CT_CONNECTION_STATE_EVT:
         if (p->conn_stat.connected) {
             ESP_LOGI(TAG, "AVRCP connected");
+
+            /* Gửi absolute volume */
+            bt_audio_set_volume(18);
+
             /* Query remote features */
             esp_avrc_ct_send_get_rn_capabilities_cmd(0);
         } else {
@@ -616,8 +620,11 @@ static void bt_audio_avrc_cb(esp_avrc_ct_cb_event_t event, esp_avrc_ct_cb_param_
     case ESP_AVRC_CT_CHANGE_NOTIFY_EVT:
         if (p->change_ntf.event_id == ESP_AVRC_RN_VOLUME_CHANGE) {
             uint8_t vol_0_127 = p->change_ntf.event_parameter.volume;
-            uint8_t vol_pct   = (uint8_t)((uint32_t)vol_0_127 * 100 / 127);
-            ESP_LOGI(TAG, "Remote volume changed: %d/127 (%d%%)", vol_0_127, vol_pct);
+            
+            s_volume   = (uint8_t)((uint32_t)vol_0_127 * 100 / 127);
+            bt_notify_signal(BT_AUDIO_EVT_VOLUME_CHANGE);
+            
+            ESP_LOGI(TAG, "Remote volume changed: %d/127 (%d%%)", vol_0_127, s_volume);
 
             /* Re-register notification cho lần thay đổi tiếp */
             esp_avrc_ct_send_register_notification_cmd(1, ESP_AVRC_RN_VOLUME_CHANGE, 0);
@@ -677,8 +684,8 @@ esp_err_t bt_audio_init(const char *device_name)
 
     /* 9. Reset state */
     s_state      = BT_AUDIO_STATE_IDLE;
-    s_volume     = 100;
     s_decoder    = NULL;
+    s_volume     = 18;
     s_disc_count = 0;
     s_remote_has_abs_vol = false;
     atomic_store(&s_bytes_played, 0);
@@ -947,17 +954,14 @@ void bt_audio_set_volume(uint8_t volume_pct)
         /* Convert 0-100 → 0-127 (AVRCP range) */
         uint8_t vol_0_127 = (uint8_t)((uint32_t)volume_pct * 127 / 100);
         esp_avrc_ct_send_set_absolute_volume_cmd(0, vol_0_127);
+    }
 
-        s_volume = 100;
-    }
-    else {
-        s_volume = volume_pct;
-    }
+    s_volume = volume_pct;
 }
 
 uint8_t bt_audio_get_volume(void)
 {
-    return (uint8_t)atomic_load(&s_volume);
+    return s_volume;
 }
 
 esp_err_t bt_audio_get_device_info(bt_audio_device_info_t *info)

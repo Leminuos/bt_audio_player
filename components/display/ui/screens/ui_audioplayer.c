@@ -220,7 +220,7 @@ void ui_audioplayer_screen_init(void)
     lv_obj_set_flex_grow(ui_sliderVolume, 1);
     lv_obj_set_height(ui_sliderVolume, 6);
     lv_slider_set_range(ui_sliderVolume, 0, 100);
-    lv_slider_set_value(ui_sliderVolume, 70, LV_ANIM_OFF);
+    lv_slider_set_value(ui_sliderVolume, 0, LV_ANIM_OFF);
 
     lv_obj_add_style(ui_sliderVolume, &style_progress_main, LV_PART_MAIN);
     lv_obj_add_style(ui_sliderVolume, &style_progress_indicator, LV_PART_INDICATOR);
