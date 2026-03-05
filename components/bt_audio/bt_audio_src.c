@@ -394,6 +394,11 @@ static void bt_audio_a2dp_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param
             s_device.connected = true;
             memcpy(s_device.bda, bda, 6);
             bt_format_bda(s_device.bda_str, sizeof(s_device.bda_str), bda);
+
+            /* Request đọc remote name nếu chưa có */
+            if (s_device.name[0] == '\0')
+                esp_bt_gap_read_remote_name(bda);
+
             bt_set_state(BT_AUDIO_STATE_CONNECTED);
             break;
 
@@ -744,6 +749,19 @@ esp_err_t bt_audio_init(const char *device_name)
     s_file_info.total_pcm_bytes  = 0;
     memset(&s_file_info.title, 0, sizeof(s_file_info.title));
 
+#if BT_AUDIO_DEV_MODE
+    int num = esp_bt_gap_get_bond_device_num();
+    if (num > 0) {
+        esp_bd_addr_t *devs = malloc(num * sizeof(esp_bd_addr_t));
+        if (devs) {
+            esp_bt_gap_get_bond_device_list(&num, devs);
+            for (int i = 0; i < num; i++)
+                esp_bt_gap_remove_bond_device(devs[i]);
+            free(devs);
+        }
+    }
+#endif /* BT_AUDIO_DEV_MODE */
+
     bt_set_state(BT_AUDIO_STATE_IDLE);
 
     /* 10. Đăng ký decoder interface */
@@ -873,8 +891,6 @@ esp_err_t bt_audio_connect(const uint8_t bda[6])
 
     char bda_str[18];
 
-    // Request đọc device name
-    //esp_bt_gap_read_remote_name(bda);
     bt_format_bda(bda_str, sizeof(bda_str), bda);
     ESP_LOGI(TAG, "Connecting to %s ...", bda_str);
 

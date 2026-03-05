@@ -13,6 +13,8 @@
 #define BT_AUDIO_MODE           BT_AUDIO_MODE_SOURCE
 #endif /* BT_AUDIO_MODE */
 
+#define BT_AUDIO_DEV_MODE       1
+
 #define BT_AUDIO_SAMPLE_RATE    44100
 #define BT_AUDIO_CHANNELS       2
 #define BT_AUDIO_BITS           16
