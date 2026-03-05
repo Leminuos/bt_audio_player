@@ -17,9 +17,7 @@ void ui_bt_select_show_results(void) {
 }
 
 void ui_bt_select_show_connecting(const char *name) {
-    char buf[128];
-    snprintf(buf, sizeof(buf), "Connecting to %s...", name);
-    lv_label_set_text(lbl_status, buf);
+    lv_label_set_text_fmt(lbl_status, "Connecting to %s...", name);
     lv_obj_clear_flag(spinner, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(btn_rescan, LV_OBJ_FLAG_HIDDEN);
 }

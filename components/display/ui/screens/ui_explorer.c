@@ -21,12 +21,16 @@ void ui_explorer_screen_init(void)
     lv_obj_remove_flag(ui_explorer, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
 
     ui_ExplorerLabel = lv_label_create(ui_explorer);
-    lv_obj_set_width(ui_ExplorerLabel, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_width(ui_ExplorerLabel, 280);   /// 1
     lv_obj_set_height(ui_ExplorerLabel, LV_SIZE_CONTENT);    /// 1
     lv_obj_set_x(ui_ExplorerLabel, 0);
     lv_obj_set_y(ui_ExplorerLabel, 10);
     lv_obj_set_align(ui_ExplorerLabel, LV_ALIGN_TOP_MID);
-    lv_label_set_text(ui_ExplorerLabel, "File");
+    lv_obj_set_style_anim_duration(ui_ExplorerLabel, 5000, LV_PART_MAIN);
+    lv_obj_set_style_text_align(ui_ExplorerLabel, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(ui_ExplorerLabel, lv_color_hex(0x0082FC), 0);
+    lv_label_set_text(ui_ExplorerLabel, "No device");
+    lv_label_set_long_mode(ui_ExplorerLabel, LV_LABEL_LONG_SCROLL_CIRCULAR);
 
     ui_PanelFileList = lv_obj_create(ui_explorer);
     lv_obj_set_width(ui_PanelFileList, 280);
