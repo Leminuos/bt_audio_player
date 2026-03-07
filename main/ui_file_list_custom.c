@@ -145,6 +145,7 @@ static void cb_folder_item_clicked(lv_event_t *e) {
     }
 }
 
+extern bool ui_is_loop;
 extern bool ui_is_playing;
 
 static void cb_file_item_clicked(lv_event_t *e) {
@@ -153,6 +154,8 @@ static void cb_file_item_clicked(lv_event_t *e) {
 
     // Cập nhật UI player
     ui_is_playing = true;
+    ui_is_loop    = false;
+
     uint8_t vol = bt_audio_get_volume();
     lv_label_set_text(ui_lblSongName, entry->name);
     lv_label_set_text(ui_lblBtnPlayPause, LV_SYMBOL_PAUSE);

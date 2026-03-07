@@ -6,8 +6,9 @@
 #include "ui.h"
 #include "bt_audio.h"
 
-bool ui_is_playing;
 bool ui_is_loop;
+bool ui_is_playing;
+
 extern lv_obj_t * lbl_volume_icon;
 extern lv_obj_t * lbl_loop;
 

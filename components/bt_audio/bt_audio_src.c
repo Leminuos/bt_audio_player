@@ -52,6 +52,7 @@ static inline void bt_flag_clear(uint32_t mask) { atomic_fetch_and(&s_flags, ~ma
 /* ─── State ──────────────────────────────────────────────────────────────── */
 
 static bool                         s_auto_connect  = false;
+static bool                         s_audio_start   = false;
 static atomic_uint_fast32_t         s_bytes_played  = 0;
 static volatile uint8_t             s_volume        = 0;
 static volatile int                 s_state         = BT_AUDIO_STATE_IDLE;
@@ -228,12 +229,8 @@ static void bt_apply_volume(uint8_t *buf, size_t len, uint32_t vol)
 
 static void bt_reader_task(void *arg)
 {
-    ESP_LOGI(TAG, "Free heap: %lu", (unsigned long)esp_get_free_heap_size());
     uint8_t *buf = malloc(READ_CHUNK_SIZE);
-    if (!buf) {
-        ESP_LOGE(TAG, "Reader: malloc failed");
-        goto exit;
-    }
+    if (!buf) goto exit;
 
     while (!bt_flag_get(FLAG_STOP_READER)) {
         /* Pause: chờ resume, không đọc file */
@@ -244,7 +241,17 @@ static void bt_reader_task(void *arg)
 
         /* Gọi decoder đọc PCM data */
         int rd = s_decoder->read(buf, READ_CHUNK_SIZE);
-        if (rd <= 0) break;
+        if (rd <= 0) {
+            /* Set FLAG_END_OF_STREAM → a2dp_data_cb biết không còn data mới */
+            bt_flag_set(FLAG_END_OF_STREAM);
+
+            /* Set FLAG_PREFILLED nếu chưa → cho phép phát nốt data còn trong buffer
+             * (cho trường hợp file ngắn hơn PREFILL_SIZE)
+             */
+            if (!bt_flag_get(FLAG_PREFILLED) && s_stream_buf) {
+                bt_flag_set(FLAG_PREFILLED);
+            }
+        }
 
         /* Ghi vào stream buffer, retry nếu buffer đầy */
         size_t offset = 0;
@@ -266,19 +273,6 @@ static void bt_reader_task(void *arg)
 
     free(buf);
 
-    /*
-     * Nếu thoát loop do end of stream (không phải force stop):
-     *   - Set FLAG_EOS → a2dp_data_cb biết không còn data mới
-     *   - Set FLAG_PREFILLED nếu chưa → cho phép phát nốt data còn trong buffer
-     *     (dùng cho trường hợp file ngắn hơn PREFILL_SIZE)
-     */
-    if (!bt_flag_get(FLAG_STOP_READER)) {
-        bt_flag_set(FLAG_END_OF_STREAM);
-        if (!bt_flag_get(FLAG_PREFILLED) && s_stream_buf) {
-            bt_flag_set(FLAG_PREFILLED);
-        }
-    }
-    
 exit:
     s_reader_task = NULL;
     vTaskDelete(NULL);
@@ -299,6 +293,26 @@ static void bt_stop_reader(void)
         vTaskDelete(s_reader_task);
         s_reader_task = NULL;
     }
+}
+
+static esp_err_t bt_init_resource_playback(void) {
+    if (s_reader_task || s_stream_buf) return ESP_OK;
+
+    /* Tạo streambuffer để truyền nhận dữ liệu realtime giữa consumer và provider */
+    StreamBufferHandle_t buf = xStreamBufferCreate(BUF_SIZE, BT_AUDIO_FRAME_SIZE);
+    if (!buf) return ESP_ERR_NO_MEM;
+
+    /* Tạo reader task — bắt đầu đọc file */
+    if (xTaskCreatePinnedToCore(bt_reader_task, "reader_task",
+                                READER_TASK_STACK, NULL,
+                                READER_TASK_PRIO, &s_reader_task, 1) != pdPASS) {
+        vStreamBufferDelete(buf);
+        return ESP_ERR_NO_MEM;
+    }
+
+    s_stream_buf = buf;
+
+    return ESP_OK;
 }
 
 /**
@@ -356,7 +370,10 @@ static int32_t bt_audio_a2dp_data_cb(uint8_t *out, int32_t len)
      /* Lấy PCM data từ stream buffer (non-blocking, timeout = 0) */
     size_t got = xStreamBufferReceive(s_stream_buf, out, (size_t)len, 0);
     if (got > 0) atomic_fetch_add(&s_bytes_played, (uint_fast32_t)got);
+
+#if 0   /* nguyen.bui temporary */
     else ESP_LOGW(TAG, "CB: underrun (%ld requested)", (long)len);
+#endif
 
     /* Padding silence nếu buffer không đủ data (underrun) */
     if ((int32_t)got < len) memset(out + got, 0, len - got);
@@ -370,7 +387,6 @@ static int32_t bt_audio_a2dp_data_cb(uint8_t *out, int32_t len)
     /* Check end of stream */
     if ((flags & FLAG_END_OF_STREAM) && xStreamBufferBytesAvailable(s_stream_buf) == 0) {
         bt_flag_clear(FLAG_END_OF_STREAM);
-        esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_STOP);
         bt_notify_signal(BT_AUDIO_EVT_TRACK_FINISHED);
     }
 
@@ -419,12 +435,14 @@ static void bt_audio_a2dp_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param
         case ESP_A2D_AUDIO_STATE_STARTED:
             /* BT sink accept stream → bắt đầu phát */
             ESP_LOGI(TAG, "Audio stream started");
+            s_audio_start = true;
             bt_set_state(BT_AUDIO_STATE_PLAYING);
             break;
 
         case ESP_A2D_AUDIO_STATE_STOPPED:
             /* Stream dừng (do bt_audio_stop() hoặc auto stop sau track finished) */
             ESP_LOGI(TAG, "Audio stream stopped");
+            s_audio_start = false;
             bt_cleanup_resource_playback();
             bt_set_state(BT_AUDIO_STATE_IDLE);
             break;
@@ -912,8 +930,8 @@ esp_err_t bt_audio_play(const char *path)
     if (!path) return ESP_ERR_INVALID_ARG;
     if (!s_device.connected) return ESP_ERR_INVALID_STATE;
 
-    /* Stop bài đang phát (nếu có) trước khi play bài mới */
-    if (s_reader_task || s_stream_buf) bt_audio_stop();
+    /* Tạm thời pause bài đang phát (nếu có) trước khi play bài mới */
+    if (s_audio_start && s_decoder) bt_flag_set(FLAG_PAUSED);
 
     /* Tìm decoder phù hợp với extension của file. Ví dụ: *.wav, *.raw,... */
     const bt_audio_decoder_t *dec = bt_find_decoder(path);
@@ -928,29 +946,16 @@ esp_err_t bt_audio_play(const char *path)
     esp_err_t ret = dec->open(path, &s_file_info);
     if (ret != ESP_OK) return ret;
 
-    /* Tạo streambuffer để truyền nhận dữ liệu realtime giữa consumer và provider */
-    StreamBufferHandle_t buf = xStreamBufferCreate(BUF_SIZE, BT_AUDIO_FRAME_SIZE);
-    if (!buf) { dec->close(); return ESP_ERR_NO_MEM; }
+    ret = bt_init_resource_playback();
+    if (ret != ESP_OK) { dec->close(); return ret; }
 
     /* Setup state cho playback mới */
-    s_stream_buf = buf;
-    s_decoder    = dec;
+    s_decoder = dec;
     atomic_store(&s_bytes_played, 0);
     atomic_store(&s_flags, 0);
 
-    /* Tạo reader task — bắt đầu đọc file */
-    if (xTaskCreatePinnedToCore(bt_reader_task, "reader_task",
-                                READER_TASK_STACK, NULL,
-                                READER_TASK_PRIO, &s_reader_task, 1) != pdPASS) {
-        dec->close();
-        s_decoder = NULL;
-        vStreamBufferDelete(buf);
-        s_stream_buf = NULL;
-        return ESP_ERR_NO_MEM;
-    }
-
     /* Gửi lệnh media ctrl start đến BT Stack để bắt đầu gửi data PCM */
-    esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
+    if (!s_audio_start) esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
 
     ESP_LOGI(TAG, "Play [%s]: '%s' (%.1fs)", dec->name, path, s_file_info.total_pcm_bytes ? (float)s_file_info.total_pcm_bytes / BT_AUDIO_BITRATE : 0.0f);
 
