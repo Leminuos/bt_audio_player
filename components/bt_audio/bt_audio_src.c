@@ -677,9 +677,6 @@ static void bt_audio_avrc_cb(esp_avrc_ct_cb_event_t event, esp_avrc_ct_cb_param_
         if (p->conn_stat.connected) {
             ESP_LOGI(TAG, "AVRCP connected");
 
-            /* Gửi absolute volume */
-            bt_audio_set_volume(18);
-
             /* Query remote features */
             esp_avrc_ct_send_get_rn_capabilities_cmd(0);
         } else {

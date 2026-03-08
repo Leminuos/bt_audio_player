@@ -207,6 +207,9 @@ static void cb_file_item_clicked(lv_event_t *e) {
     g_track_next = audio_track_next(g_track_cur);
     g_track_prev = audio_track_prev(g_track_cur);
 
+    /* Gửi absolute volume */
+    bt_audio_set_volume(18);
+
     // Cập nhật UI player
     ui_is_loop = false;
     ui_refresh_player(entry);
