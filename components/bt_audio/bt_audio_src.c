@@ -27,9 +27,9 @@ static const char *TAG = "bt_audio";
 
 /* ─── Buffer config ──────────────────────────────────────────────────────── */
 
-#define BUF_SIZE            (16 * 1024)             /* 32 KB ≈ 186ms audio */
-#define PREFILL_SIZE        (12 * 1024)             /* Ngưỡng bắt đầu phát */
-#define READ_CHUNK_SIZE     512
+#define BUF_SIZE            (24 * 1024)             /* 24 KB ≈ 139ms audio */
+#define PREFILL_SIZE        (20 * 1024)             /* Ngưỡng bắt đầu phát */
+#define READ_CHUNK_SIZE     1024
 
 /* ─── Reader task config ─────────────────────────────────────────────────── */
 
@@ -376,7 +376,16 @@ static int32_t bt_audio_a2dp_data_cb(uint8_t *out, int32_t len)
 #endif
 
     /* Padding silence nếu buffer không đủ data (underrun) */
-    if ((int32_t)got < len) memset(out + got, 0, len - got);
+    if ((int32_t)got < len) {
+        memset(out + got, 0, len - got);
+
+        /* Output silence hoàn toàn cho đến khi buffer đầy lại
+         * Không áp dụng khi đã EOF vì reader đã dừng rồi
+         */
+        if (!(flags & FLAG_END_OF_STREAM)) {
+            bt_flag_clear(FLAG_PREFILLED);
+        }
+    }
 
     /* Apply software volume */
     bt_apply_volume(out, (size_t)len, s_volume);
