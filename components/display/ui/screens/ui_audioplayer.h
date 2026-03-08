@@ -21,6 +21,12 @@ extern lv_obj_t * ui_lblTimeTotal;
 extern lv_obj_t * ui_btnPlayPause;
 extern lv_obj_t * ui_lblBtnPlayPause;
 extern lv_obj_t * ui_sliderVolume;
+
+extern lv_obj_t * ui_btn_back;
+extern lv_obj_t * ui_btn_prev;
+extern lv_obj_t * ui_btn_next;
+extern lv_obj_t * ui_btn_loop;
+
 // CUSTOM VARIABLES
 extern lv_obj_t * uic_audioplayer;
 #ifdef __cplusplus

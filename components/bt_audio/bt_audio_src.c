@@ -296,7 +296,7 @@ static void bt_stop_reader(void)
 }
 
 static esp_err_t bt_init_resource_playback(void) {
-    if (s_reader_task || s_stream_buf) return ESP_OK;
+    if (s_reader_task && s_stream_buf) return ESP_OK;
 
     /* Tạo streambuffer để truyền nhận dữ liệu realtime giữa consumer và provider */
     StreamBufferHandle_t buf = xStreamBufferCreate(BUF_SIZE, BT_AUDIO_FRAME_SIZE);
@@ -964,18 +964,24 @@ esp_err_t bt_audio_play(const char *path)
 
 void bt_audio_pause(void)
 {
+    if (!s_audio_start) return;
+
     bt_flag_set(FLAG_PAUSED);
     bt_set_state(BT_AUDIO_STATE_PAUSED);
 }
 
 void bt_audio_resume(void)
 {
+    if (!s_audio_start) return;
+
     bt_flag_clear(FLAG_PAUSED);
     bt_set_state(BT_AUDIO_STATE_PLAYING);
 }
 
 void bt_audio_stop(void)
 {
+    if (!s_audio_start) return;
+
     bt_stop_reader();
 
     /* Gửi lệnh media ctrl stop đến BT Stack để yêu cầu dừng gửi data PCM */

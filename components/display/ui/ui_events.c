@@ -7,6 +7,7 @@
 #include "bt_audio.h"
 
 bool ui_is_loop;
+bool ui_is_finish;
 bool ui_is_playing;
 
 extern lv_obj_t * lbl_volume_icon;
@@ -25,19 +26,25 @@ void cb_btn_play_pause(lv_event_t *e) {
 
     if (ui_is_playing) {
         lv_label_set_text(ui_lblBtnPlayPause, LV_SYMBOL_PAUSE);
-        bt_audio_resume();
+
+        if(ui_is_finish) bt_audio_seek(0);
+        else bt_audio_resume();
     } else {
         lv_label_set_text(ui_lblBtnPlayPause, LV_SYMBOL_PLAY);
         bt_audio_pause();
     }
 }
 
+extern esp_err_t ui_audio_prev_track();
+
 void cb_btn_prev(lv_event_t *e) {
-    // TODO: audio_prev();
+    ui_audio_prev_track();
 }
 
+extern esp_err_t ui_audio_next_track();
+
 void cb_btn_next(lv_event_t *e) {
-    // TODO: audio_next();
+    ui_audio_next_track();
 }
 
 void cb_btn_loop(lv_event_t *e) {

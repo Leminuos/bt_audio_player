@@ -17,10 +17,10 @@ lv_obj_t * ui_sliderVolume;
 lv_obj_t * lbl_volume_icon;
 lv_obj_t * lbl_loop;
 
-static lv_obj_t * btn_back;
-static lv_obj_t * btn_prev;
-static lv_obj_t * btn_next;
-static lv_obj_t * btn_loop;
+lv_obj_t * ui_btn_back;
+lv_obj_t * ui_btn_prev;
+lv_obj_t * ui_btn_next;
+lv_obj_t * ui_btn_loop;
 
 // Styles
 static lv_style_t style_screen_bg;
@@ -92,34 +92,34 @@ void ui_audioplayer_screen_init(void)
     // ============================================================
     // Back button (góc trái trên)
     // ============================================================
-    btn_back = lv_btn_create(ui_audioplayer);
-    lv_obj_set_size(btn_back, 40, 30);
-    lv_obj_align(btn_back, LV_ALIGN_TOP_LEFT, 5, 5);
-    lv_obj_add_style(btn_back, &style_ctrl_btn, LV_STATE_DEFAULT);
-    lv_obj_add_style(btn_back, &style_ctrl_btn_pressed_2, LV_STATE_PRESSED);
+    ui_btn_back = lv_btn_create(ui_audioplayer);
+    lv_obj_set_size(ui_btn_back, 40, 30);
+    lv_obj_align(ui_btn_back, LV_ALIGN_TOP_LEFT, 5, 5);
+    lv_obj_add_style(ui_btn_back, &style_ctrl_btn, LV_STATE_DEFAULT);
+    lv_obj_add_style(ui_btn_back, &style_ctrl_btn_pressed_2, LV_STATE_PRESSED);
 
-    lv_obj_t *lbl_back = lv_label_create(btn_back);
+    lv_obj_t *lbl_back = lv_label_create(ui_btn_back);
     lv_label_set_text(lbl_back, LV_SYMBOL_LEFT);
     lv_obj_center(lbl_back);
 
-    lv_obj_add_event_cb(btn_back, cb_btn_back, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(ui_btn_back, cb_btn_back, LV_EVENT_CLICKED, NULL);
 
     // ============================================================
     // Loop button (góc phải trên)
     // ============================================================
     
-    btn_loop = lv_btn_create(ui_audioplayer);
-    lv_obj_set_size(btn_loop, 40, 30);
-    lv_obj_align(btn_loop, LV_ALIGN_TOP_RIGHT, -5, 5);
-    lv_obj_add_style(btn_loop, &style_ctrl_btn, LV_STATE_DEFAULT);
-    lv_obj_add_style(btn_loop, &style_ctrl_btn_pressed_2, LV_STATE_PRESSED);
+    ui_btn_loop = lv_btn_create(ui_audioplayer);
+    lv_obj_set_size(ui_btn_loop, 40, 30);
+    lv_obj_align(ui_btn_loop, LV_ALIGN_TOP_RIGHT, -5, 5);
+    lv_obj_add_style(ui_btn_loop, &style_ctrl_btn, LV_STATE_DEFAULT);
+    lv_obj_add_style(ui_btn_loop, &style_ctrl_btn_pressed_2, LV_STATE_PRESSED);
 
-    lbl_loop = lv_label_create(btn_loop);
+    lbl_loop = lv_label_create(ui_btn_loop);
     lv_label_set_text(lbl_loop, LV_SYMBOL_LOOP);
     lv_obj_center(lbl_loop);
     lv_obj_set_style_text_opa(lbl_loop, LV_OPA_40, 0);
 
-    lv_obj_add_event_cb(btn_loop, cb_btn_loop, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(ui_btn_loop, cb_btn_loop, LV_EVENT_CLICKED, NULL);
 
     // ============================================================
     // Song name — chữ chạy vòng nếu quá dài
@@ -181,14 +181,14 @@ void ui_audioplayer_screen_init(void)
     lv_obj_clear_flag(ctrl_row, LV_OBJ_FLAG_CLICKABLE);
 
     // --- Previous ---
-    btn_prev = lv_btn_create(ctrl_row);
-    lv_obj_set_size(btn_prev, 45, 45);
-    lv_obj_add_style(btn_prev, &style_ctrl_btn, LV_STATE_DEFAULT);
-    lv_obj_add_style(btn_prev, &style_ctrl_btn_pressed, LV_STATE_PRESSED);
-    lv_obj_t *lbl_prev = lv_label_create(btn_prev);
+    ui_btn_prev = lv_btn_create(ctrl_row);
+    lv_obj_set_size(ui_btn_prev, 45, 45);
+    lv_obj_add_style(ui_btn_prev, &style_ctrl_btn, LV_STATE_DEFAULT);
+    lv_obj_add_style(ui_btn_prev, &style_ctrl_btn_pressed, LV_STATE_PRESSED);
+    lv_obj_t *lbl_prev = lv_label_create(ui_btn_prev);
     lv_label_set_text(lbl_prev, LV_SYMBOL_PREV);
     lv_obj_center(lbl_prev);
-    lv_obj_add_event_cb(btn_prev, cb_btn_prev, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(ui_btn_prev, cb_btn_prev, LV_EVENT_CLICKED, NULL);
 
     // --- Play / Pause (lớn hơn) ---
     ui_btnPlayPause = lv_btn_create(ctrl_row);
@@ -207,14 +207,14 @@ void ui_audioplayer_screen_init(void)
     lv_obj_add_event_cb(ui_btnPlayPause, cb_btn_play_pause, LV_EVENT_CLICKED, NULL);
 
     // --- Next ---
-    btn_next = lv_btn_create(ctrl_row);
-    lv_obj_set_size(btn_next, 45, 45);
-    lv_obj_add_style(btn_next, &style_ctrl_btn, LV_STATE_DEFAULT);
-    lv_obj_add_style(btn_next, &style_ctrl_btn_pressed, LV_STATE_PRESSED);
-    lv_obj_t *lbl_next = lv_label_create(btn_next);
+    ui_btn_next = lv_btn_create(ctrl_row);
+    lv_obj_set_size(ui_btn_next, 45, 45);
+    lv_obj_add_style(ui_btn_next, &style_ctrl_btn, LV_STATE_DEFAULT);
+    lv_obj_add_style(ui_btn_next, &style_ctrl_btn_pressed, LV_STATE_PRESSED);
+    lv_obj_t *lbl_next = lv_label_create(ui_btn_next);
     lv_label_set_text(lbl_next, LV_SYMBOL_NEXT);
     lv_obj_center(lbl_next);
-    lv_obj_add_event_cb(btn_next, cb_btn_next, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(ui_btn_next, cb_btn_next, LV_EVENT_CLICKED, NULL);
 
     // ============================================================
     // Volume: icon + slider

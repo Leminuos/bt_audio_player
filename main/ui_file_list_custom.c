@@ -4,7 +4,14 @@
 #include "ui.h"
 #include "file_scanner.h"
 #include "bt_audio.h"
+#include "esp_err.h"
 
+#define AUDIO_NO_TRACK_PREV     (-1)
+#define AUDIO_NO_TRACK_NEXT     (-1)
+
+static int          g_track_cur;
+static int          g_track_next;
+static int          g_track_prev;
 static file_list_t  g_file_list;
 static lv_style_t   style_item_default;
 static lv_style_t   style_item_pressed;
@@ -42,7 +49,7 @@ void ui_refresh_file_list(const char *dir_path) {
         } else {
             if (file_is_audio(entry->name)) {
                 lv_obj_t *item = create_file_item(ui_PanelFileList, entry);
-                lv_obj_add_event_cb(item, cb_file_item_clicked, LV_EVENT_CLICKED, entry);
+                lv_obj_add_event_cb(item, cb_file_item_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)i);
             }
         }
     }
@@ -146,32 +153,96 @@ static void cb_folder_item_clicked(lv_event_t *e) {
 }
 
 extern bool ui_is_loop;
+extern bool ui_is_finish;
 extern bool ui_is_playing;
 
-static void cb_file_item_clicked(lv_event_t *e) {
-    file_entry_t *entry = (file_entry_t *)lv_event_get_user_data(e);
-    if (!entry) return;
+static int audio_track_prev(int track_cur) {
+    for (int i = track_cur - 1; i >= 0; --i) {
+        file_entry_t *e = &g_file_list.items[i];
+        if (e && !e->is_dir && file_is_audio(e->name)) return i;
+    }
 
-    // Cập nhật UI player
+    return AUDIO_NO_TRACK_PREV;
+}
+
+static int audio_track_next(int track_cur) {
+    for (int i = track_cur + 1; i < g_file_list.count; ++i) {
+        file_entry_t *e = &g_file_list.items[i];
+        if (e && !e->is_dir && file_is_audio(e->name)) return i;
+    }
+
+    return AUDIO_NO_TRACK_NEXT;
+}
+
+static void ui_refresh_player(file_entry_t *entry)
+{
     ui_is_playing = true;
     ui_is_loop    = false;
+    ui_is_finish  = false;
 
     uint8_t vol = bt_audio_get_volume();
     lv_label_set_text(ui_lblSongName, entry->name);
+    lv_label_set_text(ui_lblTimeElapsed, "00:00");
     lv_label_set_text(ui_lblBtnPlayPause, LV_SYMBOL_PAUSE);
     lv_slider_set_value(ui_sliderProgress, 0, LV_ANIM_OFF);
     lv_slider_set_value(ui_sliderVolume, vol, LV_ANIM_ON);
-
-    // Chuyển screen
-    lv_scr_load_anim(ui_audioplayer, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+    lv_obj_set_style_opa(ui_btn_prev, (g_track_prev != AUDIO_NO_TRACK_PREV) ? LV_OPA_COVER : LV_OPA_40, 0);
+    lv_obj_set_style_opa(ui_btn_next, (g_track_next != AUDIO_NO_TRACK_NEXT) ? LV_OPA_COVER : LV_OPA_40, 0);
 
     ESP_ERROR_CHECK(bt_audio_play(entry->path));
 
-    char time_total[10] = {0};
     bt_audio_playback_pos_t p = {0};
     bt_audio_get_position(&p);
-    snprintf(time_total, sizeof(time_total), "%02ld:%02ld",
-            ((p.duration_ms / 1000) / 60),
-            ((p.duration_ms / 1000) % 60));
-    lv_label_set_text(ui_lblTimeTotal, time_total);
+    lv_label_set_text_fmt(ui_lblTimeTotal, "%02ld:%02ld",
+                        ((p.duration_ms / 1000) / 60),
+                        ((p.duration_ms / 1000) % 60));
+}
+
+static void cb_file_item_clicked(lv_event_t *e) {
+    int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    file_entry_t *entry = &g_file_list.items[idx];
+    if (!entry) return;
+
+    g_track_cur  = idx;
+    g_track_next = audio_track_next(g_track_cur);
+    g_track_prev = audio_track_prev(g_track_cur);
+
+    // Cập nhật UI player
+    ui_is_loop = false;
+    ui_refresh_player(entry);
+
+    // Chuyển screen
+    lv_scr_load_anim(ui_audioplayer, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+}
+
+esp_err_t ui_audio_prev_track() {
+    if (g_track_prev == AUDIO_NO_TRACK_PREV) return ESP_FAIL;
+
+    file_entry_t *entry = &g_file_list.items[g_track_prev];
+    if (!entry) return ESP_FAIL;
+
+    g_track_next = g_track_cur;
+    g_track_cur  = g_track_prev;
+    g_track_prev = audio_track_prev(g_track_cur);
+
+    // Cập nhật UI player
+    ui_refresh_player(entry);
+
+    return ESP_OK;
+}
+
+esp_err_t ui_audio_next_track() {
+    if (g_track_next == AUDIO_NO_TRACK_NEXT) return ESP_FAIL;
+
+    file_entry_t *entry = &g_file_list.items[g_track_next];
+    if (!entry) return ESP_FAIL;
+
+    g_track_prev = g_track_cur;
+    g_track_cur  = g_track_next;
+    g_track_next = audio_track_next(g_track_cur);
+
+    // Cập nhật UI player
+    ui_refresh_player(entry);
+    
+    return ESP_OK;
 }

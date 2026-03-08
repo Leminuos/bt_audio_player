@@ -26,9 +26,12 @@ static EventGroupHandle_t s_audio_event_group;
 static TaskHandle_t s_audio_task;
 
 extern bool ui_is_loop;
+extern bool ui_is_finish;
+extern bool ui_is_playing;
 extern void ui_bt_start_scan(void);
 extern void ui_bt_stop_scan(void);
 extern void ui_refresh_file_list(const char *dir_path);
+extern esp_err_t ui_audio_next_track();
 
 static void ui_audio_task(void* param)
 {
@@ -79,11 +82,13 @@ static void ui_audio_task(void* param)
         if (bits & UI_EVENT_BT_TRACK_FINISHED) {
             if (ui_is_loop) bt_audio_seek(0);
             else {
-                bt_audio_stop();
-
-                if (display_port_lock(100)) {
-                    lv_label_set_text(ui_lblBtnPlayPause, LV_SYMBOL_PLAY);
-                    display_port_unlock();
+                if (ui_audio_next_track() != ESP_OK) {
+                    if (display_port_lock(100)) {
+                        ui_is_finish  = true;
+                        ui_is_playing = false;
+                        lv_label_set_text(ui_lblBtnPlayPause, LV_SYMBOL_PLAY);
+                        display_port_unlock();
+                    }
                 }
             }
         }
