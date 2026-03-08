@@ -67,6 +67,12 @@ void cb_slider_progress(lv_event_t *e) {
 
     uint32_t seek_ms = ((p.duration_ms * pct) / 100) + ((p.duration_ms * pct) % 100);
     bt_audio_seek(seek_ms);
+
+    if (ui_is_finish) {
+        ui_is_finish  = false;
+        ui_is_playing = true;
+        lv_label_set_text(ui_lblBtnPlayPause, LV_SYMBOL_PAUSE);
+    }
 }
 
 void cb_slider_volume(lv_event_t *e) {

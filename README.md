@@ -1,3 +1,5 @@
+## Issue list
+
 > **Commit: "Fix issue race condition"**
 
 Đây là race condition trong `bt_audio_play()`.
@@ -42,3 +44,19 @@ Ngoài ra, thực hiện tăng kích thước buffer và số byte trong một l
 #define PREFILL_SIZE        (20 * 1024)
 #define READ_CHUNK_SIZE     1024
 ```
+
+> **Commit: "Fix issue wdt trigger at bt_reader_task"**
+
+**Nguyên nhân:**
+
+Sau khi đọc hết file (`rd <= 0`), task quay lại vòng lặp và tiếp tục gọi `fread()` liên tục mà không có `vTaskDelay` nào → IDLE1 không bao giờ được chạy → watchdog triggered.
+
+**Giải pháp:**
+
+Thêm cờ `FLAG_READER_EOF`
+- **Set:** Trong `bt_reader_task` khi `rd <= 0`
+- **Clear:** Trong `bt_audio_play()`, `bt_audio_seek()`, `bt_audio_stop()` (bất cứ nơi nào có thể restart hoặc reposition file).
+
+Khi end of file thì block với `vTaskDelay(50)` cho đến khi:
+  - `FLAG_STOP_READER` được set (khi `bt_audio_stop()`) → task thoát
+  - `FLAG_READER_EOF` bị clear → task tiếp tục đọc

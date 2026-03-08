@@ -43,6 +43,7 @@ static const char *TAG = "bt_audio";
 #define FLAG_PAUSED         (1U << 2)
 #define FLAG_STOP_READER    (1U << 3)
 #define FLAG_END_OF_STREAM  (1U << 4)
+#define FLAG_READER_EOF     (1U << 5)
 
 static atomic_uint s_flags = 0;
 static inline bool bt_flag_get(uint32_t mask) { return (atomic_load(&s_flags) & mask) != 0; }
@@ -243,7 +244,7 @@ static void bt_reader_task(void *arg)
         int rd = s_decoder->read(buf, READ_CHUNK_SIZE);
         if (rd <= 0) {
             /* Set FLAG_END_OF_STREAM → a2dp_data_cb biết không còn data mới */
-            bt_flag_set(FLAG_END_OF_STREAM);
+            bt_flag_set(FLAG_END_OF_STREAM | FLAG_READER_EOF);
 
             /* Set FLAG_PREFILLED nếu chưa → cho phép phát nốt data còn trong buffer
              * (cho trường hợp file ngắn hơn PREFILL_SIZE)
@@ -251,6 +252,13 @@ static void bt_reader_task(void *arg)
             if (!bt_flag_get(FLAG_PREFILLED) && s_stream_buf) {
                 bt_flag_set(FLAG_PREFILLED);
             }
+
+            /* Chờ clear FLAG_READER_EOF */
+            while (!bt_flag_get(FLAG_STOP_READER) && bt_flag_get(FLAG_READER_EOF)) {
+                vTaskDelay(pdMS_TO_TICKS(50));
+            }
+
+            continue;
         }
 
         /* Ghi vào stream buffer, retry nếu buffer đầy */
@@ -1013,7 +1021,7 @@ void bt_audio_seek(uint32_t position_ms)
     if (s_decoder->seek(offset) == ESP_OK) {
 
         // Xóa dữ liệu cũ trong stream buffer để tránh phát lại
-        bt_flag_clear(FLAG_PREFILLED | FLAG_END_OF_STREAM);
+        bt_flag_clear(FLAG_PREFILLED | FLAG_END_OF_STREAM | FLAG_READER_EOF);
         xStreamBufferReset(s_stream_buf);
         atomic_store(&s_bytes_played, (uint_fast32_t)offset);
     }
