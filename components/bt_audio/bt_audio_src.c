@@ -946,13 +946,13 @@ esp_err_t bt_audio_play(const char *path)
     esp_err_t ret = dec->open(path, &s_file_info);
     if (ret != ESP_OK) return ret;
 
-    ret = bt_init_resource_playback();
-    if (ret != ESP_OK) { dec->close(); return ret; }
-
     /* Setup state cho playback mới */
     s_decoder = dec;
     atomic_store(&s_bytes_played, 0);
     atomic_store(&s_flags, 0);
+
+    ret = bt_init_resource_playback();
+    if (ret != ESP_OK) { dec->close(); s_decoder = NULL; return ret; }
 
     /* Gửi lệnh media ctrl start đến BT Stack để bắt đầu gửi data PCM */
     if (!s_audio_start) esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
