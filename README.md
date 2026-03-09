@@ -87,3 +87,24 @@ xTaskCreatePinnedToCore(bt_reader_task, "reader_task",
                         READER_TASK_PRIO, &s_reader_task, 1);
 ```
 
+> **Commit: "Memory leak in bt_audio_check_bonded_devices"**
+
+**File:** [bt_audio_src.c:499-513](./components/bt_audio/bt_audio_src.c#L499-L513)
+
+```c
+static bool bt_audio_check_bonded_devices(uint8_t* bda) {
+    esp_bd_addr_t *dev_list = malloc(dev_num * sizeof(esp_bd_addr_t));
+    // ...
+    for (int i = 0; i < dev_num; i++) {
+        if (memcmp(bda, dev_list[i], 6) == 0) {
+            return true;   // ← LEAK: không free(dev_list)!
+        }
+    }
+    free(dev_list);
+    return false;
+}
+```
+
+**Nguyên nhân:**
+
+Khi tìm thấy device đã bond, `return true` mà **không `free(dev_list)`**. Mỗi lần discovery tìm thấy bonded device = leak `dev_num × 6` bytes.

@@ -504,6 +504,7 @@ static bool bt_audio_check_bonded_devices(uint8_t* bda) {
 
     for (int i = 0; i < dev_num; i++) {
         if (memcmp(bda, dev_list[i], 6) == 0) {
+            free(dev_list);
             return true;
         }
     }
