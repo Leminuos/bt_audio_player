@@ -96,7 +96,12 @@ static lv_obj_t *create_file_item(lv_obj_t *parent, file_entry_t *entry) {
 
     lv_obj_t *label = lv_label_create(item);
     lv_label_set_text(label, entry ? entry->name : ".. (Back)");
+    lv_obj_set_width(label, 0);
     lv_obj_set_flex_grow(label, 1);
+
+    const lv_font_t * font = lv_obj_get_style_text_font(label, 0);
+    lv_coord_t font_h = lv_font_get_line_height(font);
+    lv_obj_set_height(label, font_h);
 
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
 
