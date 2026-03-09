@@ -34,7 +34,7 @@ static const char *TAG = "bt_audio";
 /* ─── Reader task config ─────────────────────────────────────────────────── */
 
 #define READER_TASK_STACK   (4 * 1024)
-#define READER_TASK_PRIO    5
+#define READER_TASK_PRIO    (7)
 #define READER_STOP_WAIT_MS 500
 
 /* ─── Atomic flags ───────────────────────────────────────────────────────── */

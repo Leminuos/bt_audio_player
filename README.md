@@ -60,3 +60,30 @@ Thêm cờ `FLAG_READER_EOF`
 Khi end of file thì block với `vTaskDelay(50)` cho đến khi:
   - `FLAG_STOP_READER` được set (khi `bt_audio_stop()`) → task thoát
   - `FLAG_READER_EOF` bị clear → task tiếp tục đọc
+
+> **Commit: "Increase the priority of the reader_task task"**
+
+**File:** [bt_audio_src.c:314-316](./components/bt_audio/bt_audio_src.c#L314-L316), [hardware.h:40](./components/display/include/hardware.h#L40), [main.c:174](./main/main.c#L174)
+
+**Nguyên nhân:**
+
+- `reader_task` (prio **5**) chạy trên **Core 1**
+- `lvgl_task` (prio **5**) chạy trên **Core 1** — round-robin → chia CPU
+- `audio_task` (prio **6**) chạy trên **Core 1** — **preempt** `reader_task` mỗi lần có event.
+
+Trong đó: `reader_task` là một task đọc sdcard để gửi cho pcm data cho bt stack
+  -> Điều này là realtime.
+  -> Task này cần có độ ưu tiên cao hơn lvgl để tránh việc khi lvgl render thì bị cạn buffer do `reader_task` không được chạy.
+
+**Giải pháp:**
+
+Tăng độ ưu tiên của `reader_task`
+
+```c
+#define READER_TASK_PRIO    (7)
+
+xTaskCreatePinnedToCore(bt_reader_task, "reader_task",
+                        READER_TASK_STACK, NULL,
+                        READER_TASK_PRIO, &s_reader_task, 1);
+```
+
