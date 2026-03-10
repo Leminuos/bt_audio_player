@@ -146,3 +146,30 @@ if ((int32_t)got < len) {
     }
 }
 ```
+
+> **Commit: "Issue when change track"**
+
+Trong `bt_audio_play()` khi chuyển track (đang phát bài A → play bài B):
+
+```c
+// line 952: Pause reader
+bt_flag_set(FLAG_PAUSED);
+
+// line 964: Open bài mới
+dec->open(path, &s_file_info);
+
+// line 968-970: Reset state
+s_decoder = dec;
+atomic_store(&s_bytes_played, 0);
+atomic_store(&s_flags, 0);   // ← Clear all flags
+
+// line 972: Reuse existing task + buffer
+bt_init_resource_playback(); // ← Returns ESP_OK immediately
+```
+
+> [!CAUTION]
+> Stream buffer không bị reset khi chuyển bài! Old PCM data từ bài A vẫn nằm trong buffer. Reader bắt đầu ghi data bài B vào phía sau. Callback sẽ đọc: `[old data bài A] → [new data bài B]` → glitch tại điểm chuyển.
+
+**Giải pháp:**
+
+Thêm `xStreamBufferReset()` trước khi bắt đầu bài mới.

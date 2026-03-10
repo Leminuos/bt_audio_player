@@ -304,8 +304,11 @@ static void bt_stop_reader(void)
 }
 
 static esp_err_t bt_init_resource_playback(void) {
-    if (s_reader_task && s_stream_buf) return ESP_OK;
-
+    if (s_reader_task && s_stream_buf) {
+        xStreamBufferReset(s_stream_buf);
+        return ESP_OK;
+    }
+    
     /* Tạo streambuffer để truyền nhận dữ liệu realtime giữa consumer và provider */
     StreamBufferHandle_t buf = xStreamBufferCreate(BUF_SIZE, BT_AUDIO_FRAME_SIZE);
     if (!buf) return ESP_ERR_NO_MEM;
