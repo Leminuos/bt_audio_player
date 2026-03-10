@@ -391,7 +391,10 @@ static int32_t bt_audio_a2dp_data_cb(uint8_t *out, int32_t len)
          * Không áp dụng khi đã EOF vì reader đã dừng rồi
          */
         if (!(flags & FLAG_END_OF_STREAM)) {
-            bt_flag_clear(FLAG_PREFILLED);
+            if (xStreamBufferBytesAvailable(s_stream_buf) < 2048)
+            {
+                bt_flag_clear(FLAG_PREFILLED);
+            }
         }
     }
 

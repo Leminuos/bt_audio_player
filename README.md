@@ -108,3 +108,41 @@ static bool bt_audio_check_bonded_devices(uint8_t* bda) {
 **Nguyên nhân:**
 
 Khi tìm thấy device đã bond, `return true` mà **không `free(dev_list)`**. Mỗi lần discovery tìm thấy bonded device = leak `dev_num × 6` bytes.
+
+> **Commit: "Actually clear prefill when reaching the threshold"**
+
+**File:** [bt_audio_src.c:387-396](./components/bt_audio/bt_audio_src.c#L387-L396)
+
+```c
+if ((int32_t)got < len) {
+    memset(out + got, 0, len - got);
+    if (!(flags & FLAG_END_OF_STREAM)) {
+        bt_flag_clear(FLAG_PREFILLED);   // ← Clear prefill flag
+    }
+}
+```
+
+**Vấn đề:**
+
+- Khi xảy ra underrun (dù chỉ thiếu **1 byte**), code clear `FLAG_PREFILLED`
+- Callback tiếp theo thấy `!FLAG_PREFILLED` → output silence
+- Reader phải fill lại 20KB (113ms đọc SD card) trước khi audio tiếp tục
+- Kết quả: 1 underrun nhỏ → khoảng lặng dài 100-200ms nghe rất rõ
+
+**Giải pháp:** 
+
+Thay vì clear prefilled ngay, dùng threshold thấp hơn:
+
+```c
+if ((int32_t)got < len) {
+    memset(out + got, 0, len - got);
+    
+    /* Chỉ clear prefilled khi buffer thực sự cạn kiệt (< 2KB) */
+    if (!(flags & FLAG_END_OF_STREAM)) {
+        if (xStreamBufferBytesAvailable(s_stream_buf) < 2048)
+        {
+            bt_flag_clear(FLAG_PREFILLED);
+        }
+    }
+}
+```
