@@ -16,11 +16,10 @@ static const char* TAG = "main";
 
 #define UI_EVENT_BT_DISCOVERY_DONE      BIT0
 #define UI_EVENT_BT_DEVICE_CONNECTED    BIT1  
-#define UI_EVENT_BT_TRACK_CHANGED       BIT2
 #define UI_EVENT_BT_TRACK_FINISHED      BIT3
 #define UI_EVENT_BT_DEVICE_DISCONNECTED BIT4
 #define UI_EVENT_BT_VOLUME_CHANGE       BIT5
-#define UI_EVENT_BT_ALL                 BIT0 | BIT1 | BIT2 | BIT3 | BIT4 | BIT5
+#define UI_EVENT_BT_ALL                 BIT0 | BIT1 | BIT3 | BIT4 | BIT5
 
 static EventGroupHandle_t s_audio_event_group;
 static TaskHandle_t s_audio_task;
@@ -63,18 +62,6 @@ static void ui_audio_task(void* param)
                 }
 
                 ui_refresh_file_list("/sdcard");
-                display_port_unlock();
-            }
-        }
-
-        if (bits & UI_EVENT_BT_TRACK_CHANGED) {
-            if (display_port_lock(100)) {
-                bt_audio_playback_pos_t p = {0};
-                bt_audio_get_position(&p);
-                lv_label_set_text_fmt(ui_lblTimeElapsed, "%02ld:%02ld",
-                                    ((p.position_ms / 1000) / 60),
-                                    ((p.position_ms / 1000) % 60));
-                lv_slider_set_value(ui_sliderProgress, p.progress_pct, LV_ANIM_ON);
                 display_port_unlock();
             }
         }
@@ -142,11 +129,6 @@ static void on_bt_event(const bt_audio_event_t *evt)
         default:
             break;
         }
-        break;
-    }
-
-    case BT_AUDIO_EVT_DATA_UPDATE: {
-        xEventGroupSetBits(s_audio_event_group, UI_EVENT_BT_TRACK_CHANGED);
         break;
     }
     

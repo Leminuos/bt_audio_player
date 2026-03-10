@@ -173,3 +173,23 @@ bt_init_resource_playback(); // ← Returns ESP_OK immediately
 **Giải pháp:**
 
 Thêm `xStreamBufferReset()` trước khi bắt đầu bài mới.
+
+> **Commit: "Remove event data change to update UI"**
+
+**File:** [bt_audio_src.c:402](./components/bt_audio/bt_audio_src.c#L402)
+
+```c
+/* Mỗi ~7ms gọi 1 lần */
+bt_notify_signal(BT_AUDIO_EVT_DATA_UPDATE);
+```
+
+**Vấn đề:**
+
+- `a2dp_data_cb` được BT stack gọi khoảng **~140 lần/giây** (mỗi 7ms)
+- Mỗi lần gọi `bt_notify_signal(BT_AUDIO_EVT_DATA_UPDATE)` → `xEventGroupSetBits()` → wake `audio_task`
+- `audio_task` (prio 6 > reader_task prio 5) sẽ preempt reader mỗi 7ms để cập nhật UI progress bar
+- Cập nhật slider 140 lần/giây là hoàn toàn không cần thiết (mắt chỉ thấy ~30fps)
+
+**Giải pháo:** 
+
+Bỏ event `BT_AUDIO_EVT_DATA_UPDATE`, thay vào đó là sử dụng `lv_timer`.

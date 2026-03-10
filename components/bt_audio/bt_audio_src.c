@@ -404,9 +404,6 @@ static int32_t bt_audio_a2dp_data_cb(uint8_t *out, int32_t len)
     /* Apply software volume */
     bt_apply_volume(out, (size_t)len, s_volume);
 
-    /* Bắn sự kiện DATA_UPDATE event */
-    bt_notify_signal(BT_AUDIO_EVT_DATA_UPDATE);
-
     /* Check end of stream */
     if ((flags & FLAG_END_OF_STREAM) && xStreamBufferBytesAvailable(s_stream_buf) == 0) {
         bt_flag_clear(FLAG_END_OF_STREAM);

@@ -13,10 +13,13 @@ bool ui_is_playing;
 extern lv_obj_t * lbl_volume_icon;
 extern lv_obj_t * lbl_loop;
 
+extern void ui_player_stop_update(void);
+
 void cb_btn_back(lv_event_t *e) {
     lv_scr_load_anim(ui_explorer, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, false);
 
     ui_is_playing = false;
+    ui_player_stop_update();
     lv_label_set_text(ui_lblBtnPlayPause, LV_SYMBOL_PLAY);
     bt_audio_stop();
 }

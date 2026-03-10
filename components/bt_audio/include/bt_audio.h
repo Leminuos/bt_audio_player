@@ -111,7 +111,6 @@ typedef enum {
 typedef enum {
     BT_AUDIO_EVT_STATE_CHANGED,     /**< Trạng thái audio thay đổi */
     BT_AUDIO_EVT_DISCOVERY_RESULT,  /**< Tìm thấy thiết bị mới */
-    BT_AUDIO_EVT_DATA_UPDATE,
     BT_AUDIO_EVT_TRACK_FINISHED,    /**< Track phát xong */
     BT_AUDIO_EVT_VOLUME_CHANGE
 } bt_audio_evt_type_t;

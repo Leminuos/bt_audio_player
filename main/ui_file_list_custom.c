@@ -15,6 +15,7 @@ static int          g_track_prev;
 static file_list_t  g_file_list;
 static lv_style_t   style_item_default;
 static lv_style_t   style_item_pressed;
+static lv_timer_t   *player_update_timer = NULL;
 
 static void init_file_item_styles(void);
 static bool file_is_audio(const char *filename);
@@ -203,6 +204,28 @@ static void ui_refresh_player(file_entry_t *entry)
                         ((p.duration_ms / 1000) % 60));
 }
 
+static void player_timer_cb(lv_timer_t *timer) {
+    bt_audio_playback_pos_t p;
+    bt_audio_get_position(&p);
+
+    lv_label_set_text_fmt(ui_lblTimeElapsed, "%02lu:%02lu",
+                          (unsigned long)((p.position_ms / 1000) / 60),
+                          (unsigned long)((p.position_ms / 1000) % 60));
+
+    lv_slider_set_value(ui_sliderProgress, p.progress_pct, LV_ANIM_ON);
+}
+
+void ui_player_start_update(void) {
+    if (player_update_timer == NULL)
+        player_update_timer = lv_timer_create(player_timer_cb, 250, NULL);
+    else
+        lv_timer_resume(player_update_timer);
+}
+
+void ui_player_stop_update(void) {
+    if (player_update_timer) lv_timer_pause(player_update_timer);
+} 
+
 static void cb_file_item_clicked(lv_event_t *e) {
     int idx = (int)(intptr_t)lv_event_get_user_data(e);
     file_entry_t *entry = &g_file_list.items[idx];
@@ -218,6 +241,8 @@ static void cb_file_item_clicked(lv_event_t *e) {
     // Cập nhật UI player
     ui_is_loop = false;
     ui_refresh_player(entry);
+
+    ui_player_start_update();
 
     // Chuyển screen
     lv_scr_load_anim(ui_audioplayer, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
