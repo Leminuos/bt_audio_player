@@ -27,8 +27,9 @@ static const char *TAG = "bt_audio";
 
 /* ─── Buffer config ──────────────────────────────────────────────────────── */
 
-#define BUF_SIZE            (24 * 1024)             /* 24 KB ≈ 139ms audio */
-#define PREFILL_SIZE        (20 * 1024)             /* Ngưỡng bắt đầu phát */
+#define BUF_SIZE            (48 * 1024)             /* 48 KB ≈ 277ms audio — đủ hấp thụ SD card latency spike */
+#define PREFILL_SIZE        (32 * 1024)             /* Ngưỡng bắt đầu phát lần đầu */
+#define RESUME_SIZE         (4  * 1024)             /* Ngưỡng resume sau underrun — nhỏ để giảm khoảng lặng */
 #define READ_CHUNK_SIZE     1024
 
 /* ─── Reader task config ─────────────────────────────────────────────────── */
@@ -44,6 +45,7 @@ static const char *TAG = "bt_audio";
 #define FLAG_STOP_READER    (1U << 3)
 #define FLAG_END_OF_STREAM  (1U << 4)
 #define FLAG_READER_EOF     (1U << 5)
+#define FLAG_UNDERRUN       (1U << 6)   /* Set khi buffer drain hoàn toàn, dùng RESUME_SIZE thay vì PREFILL_SIZE */
 
 static atomic_uint s_flags = 0;
 static inline bool bt_flag_get(uint32_t mask) { return (atomic_load(&s_flags) & mask) != 0; }
@@ -272,7 +274,11 @@ static void bt_reader_task(void *arg)
             offset += written;
 
             if (!bt_flag_get(FLAG_PREFILLED) && s_stream_buf) {
-                if (xStreamBufferBytesAvailable(s_stream_buf) >= PREFILL_SIZE) {
+                /* Sau underrun dùng RESUME_SIZE nhỏ để giảm khoảng lặng,
+                 * lần đầu khởi động dùng PREFILL_SIZE để tránh underrun ngay từ đầu */
+                size_t threshold = bt_flag_get(FLAG_UNDERRUN) ? RESUME_SIZE : PREFILL_SIZE;
+                if (xStreamBufferBytesAvailable(s_stream_buf) >= threshold) {
+                    bt_flag_clear(FLAG_UNDERRUN);
                     bt_flag_set(FLAG_PREFILLED);
                 }
             }
@@ -313,15 +319,17 @@ static esp_err_t bt_init_resource_playback(void) {
     StreamBufferHandle_t buf = xStreamBufferCreate(BUF_SIZE, BT_AUDIO_FRAME_SIZE);
     if (!buf) return ESP_ERR_NO_MEM;
 
+    /* Assign TRƯỚC khi tạo task — tránh reader task chạy với s_stream_buf = NULL */
+    s_stream_buf = buf;
+
     /* Tạo reader task — bắt đầu đọc file */
     if (xTaskCreatePinnedToCore(bt_reader_task, "reader_task",
                                 READER_TASK_STACK, NULL,
                                 READER_TASK_PRIO, &s_reader_task, 1) != pdPASS) {
         vStreamBufferDelete(buf);
+        s_stream_buf = NULL;
         return ESP_ERR_NO_MEM;
     }
-
-    s_stream_buf = buf;
 
     return ESP_OK;
 }
@@ -390,14 +398,15 @@ static int32_t bt_audio_a2dp_data_cb(uint8_t *out, int32_t len)
     if ((int32_t)got < len) {
         memset(out + got, 0, len - got);
 
-        /* Output silence hoàn toàn cho đến khi buffer đầy lại
-         * Không áp dụng khi đã EOF vì reader đã dừng rồi
+        /* Chỉ force re-prefill khi buffer HOÀN TOÀN trống.
+         * Partial underrun (got > 0) → chỉ pad silence cho frame này, reader task
+         * sẽ nạp thêm kịp cho frame tiếp.
+         * Set FLAG_UNDERRUN để reader dùng RESUME_SIZE (4KB) thay vì PREFILL_SIZE (32KB),
+         * giảm khoảng lặng từ ~186ms xuống còn ~23ms sau khi SD spike hết.
          */
-        if (!(flags & FLAG_END_OF_STREAM)) {
-            if (xStreamBufferBytesAvailable(s_stream_buf) < 2048)
-            {
-                bt_flag_clear(FLAG_PREFILLED);
-            }
+        if (!(flags & FLAG_END_OF_STREAM) && got == 0) {
+            bt_flag_set(FLAG_UNDERRUN);
+            bt_flag_clear(FLAG_PREFILLED);
         }
     }
 
@@ -966,13 +975,19 @@ esp_err_t bt_audio_play(const char *path)
     esp_err_t ret = dec->open(path, &s_file_info);
     if (ret != ESP_OK) return ret;
 
-    /* Setup state cho playback mới */
+    /* Setup state cho playback mới.
+     * Giữ FLAG_PAUSED = 1 trong khi reset buffer để tránh reader task write vào buffer
+     * đang bị xStreamBufferReset() → undefined behavior theo FreeRTOS docs.
+     */
     s_decoder = dec;
     atomic_store(&s_bytes_played, 0);
-    atomic_store(&s_flags, 0);
+    atomic_store(&s_flags, FLAG_PAUSED);
 
     ret = bt_init_resource_playback();
     if (ret != ESP_OK) { dec->close(); s_decoder = NULL; return ret; }
+
+    /* Buffer đã sẵn sàng → clear FLAG_PAUSED để reader task bắt đầu đọc */
+    bt_flag_clear(FLAG_PAUSED);
 
     /* Gửi lệnh media ctrl start đến BT Stack để bắt đầu gửi data PCM */
     if (!s_audio_start) esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
