@@ -191,7 +191,7 @@ static void ui_refresh_player(file_entry_t *entry)
     lv_label_set_text(ui_lblTimeElapsed, "00:00");
     lv_label_set_text(ui_lblBtnPlayPause, LV_SYMBOL_PAUSE);
     lv_slider_set_value(ui_sliderProgress, 0, LV_ANIM_OFF);
-    lv_slider_set_value(ui_sliderVolume, vol, LV_ANIM_ON);
+    lv_slider_set_value(ui_sliderVolume, vol, LV_ANIM_OFF);
     lv_obj_set_style_opa(ui_btn_prev, (g_track_prev != AUDIO_NO_TRACK_PREV) ? LV_OPA_COVER : LV_OPA_40, 0);
     lv_obj_set_style_opa(ui_btn_next, (g_track_next != AUDIO_NO_TRACK_NEXT) ? LV_OPA_COVER : LV_OPA_40, 0);
 
@@ -212,7 +212,7 @@ static void player_timer_cb(lv_timer_t *timer) {
                           (unsigned long)((p.position_ms / 1000) / 60),
                           (unsigned long)((p.position_ms / 1000) % 60));
 
-    lv_slider_set_value(ui_sliderProgress, p.progress_pct, LV_ANIM_ON);
+    lv_slider_set_value(ui_sliderProgress, p.progress_pct, LV_ANIM_OFF);
 }
 
 void ui_player_start_update(void) {
