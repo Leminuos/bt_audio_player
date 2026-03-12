@@ -69,21 +69,20 @@ static void ui_audio_task(void* param)
         if (bits & UI_EVENT_BT_TRACK_FINISHED) {
             if (ui_is_loop) bt_audio_seek(0);
             else {
-                if (ui_audio_next_track() != ESP_OK) {
-                    if (display_port_lock(100)) {
+                if (display_port_lock(100)) {
+                    if (ui_audio_next_track() != ESP_OK) {
                         ui_is_finish  = true;
                         ui_is_playing = false;
                         lv_label_set_text(ui_lblBtnPlayPause, LV_SYMBOL_PLAY);
-                        display_port_unlock();
                     }
+                    display_port_unlock();
                 }
             }
         }
 
         if (bits & UI_EVENT_BT_DEVICE_DISCONNECTED) {
-            ui_bt_start_scan();
-            
             if (display_port_lock(100)) {
+                ui_bt_start_scan();
                 lv_scr_load_anim(ui_bt_select, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
                 display_port_unlock();
             }
