@@ -930,6 +930,8 @@ esp_err_t bt_audio_connect(const uint8_t bda[6])
     bt_format_bda(bda_str, sizeof(bda_str), bda);
     ESP_LOGI(TAG, "Connecting to %s ...", bda_str);
 
+    vTaskDelay(pdMS_TO_TICKS(200));
+
     return esp_a2d_source_connect((uint8_t *)bda);
 }
 

@@ -190,6 +190,37 @@ bt_notify_signal(BT_AUDIO_EVT_DATA_UPDATE);
 - `audio_task` (prio 6 > reader_task prio 5) sẽ preempt reader mỗi 7ms để cập nhật UI progress bar
 - Cập nhật slider 140 lần/giây là hoàn toàn không cần thiết (mắt chỉ thấy ~30fps)
 
-**Giải pháo:** 
+**Giải pháp:** 
 
 Bỏ event `BT_AUDIO_EVT_DATA_UPDATE`, thay vào đó là sử dụng `lv_timer`.
+
+> **Commit: "Sometime auto disconnect when connect to device"**
+
+**Vấn đề:**
+
+Khi kết nối bluetooth, thỉnh thoảng sẽ bị disconnect trong quá trình pairing với log như sau:
+
+```
+W (7034) BT_HCI: hcif conn complete: hdl 0x80, st 0x0
+W (7074) BT_HCI: hcif link supv_to changed: hdl 0x80, supv_to 8000
+W (7194) BT_HCI: hcif disc complete: hdl 0x80, rsn 0x13
+W (7194) BT_BTC: BTA_AV_OPEN_EVT::FAILED status: 2
+```
+
+**Nguyên nhân: Timing**
+
+Connect quá sớm sau khi discovery, sink chưa hoàn tất anthentication.
+
+**Giải pháp:**
+
+Thêm một chút delay sau khi discovery.
+
+```c
+esp_err_t bt_audio_connect(const uint8_t bda[6])
+{
+    if (!bda) return ESP_ERR_INVALID_ARG;
+    esp_bt_gap_cancel_discovery();
+    vTaskDelay(pdMS_TO_TICKS(200));      // Chờ discovery dừng hẳn
+    return esp_a2d_source_connect((uint8_t *)bda);
+}
+```
