@@ -270,7 +270,7 @@ static void bt_reader_task(void *arg)
                                                 buf + offset,
                                                 (size_t)rd - offset,
                                                 100 );
-            
+
             offset += written;
 
             if (!bt_flag_get(FLAG_PREFILLED) && s_stream_buf) {
@@ -282,6 +282,19 @@ static void bt_reader_task(void *arg)
                     bt_flag_set(FLAG_PREFILLED);
                 }
             }
+        }
+
+        /* Yield 2ms sau mỗi lần đọc để IDLE task có thể chạy và reset WDT.
+         *
+         * Lý do cần yield: SPI DMA hoàn thành trong ~400µs (< 1 FreeRTOS tick = 1ms).
+         * Khi task unblock trước khi tick interrupt xảy ra, FreeRTOS không switch sang
+         * IDLE → reader_task loop liên tục → IDLE không bao giờ chạy → TWDT.
+         *
+         * Chỉ yield SAU KHI đã prefilled để không làm chậm quá trình khởi động ban đầu.
+         * Ở 176KB/s tiêu thụ: 2ms yield = 352 bytes tiêu thụ, an toàn với 48KB buffer.
+         */
+        if (bt_flag_get(FLAG_PREFILLED)) {
+            vTaskDelay(pdMS_TO_TICKS(2));
         }
     }
 
