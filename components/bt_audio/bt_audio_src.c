@@ -44,7 +44,6 @@ static const char *TAG = "bt_audio";
 #define FLAG_PAUSED         (1U << 2)
 #define FLAG_STOP_READER    (1U << 3)
 #define FLAG_END_OF_STREAM  (1U << 4)
-#define FLAG_READER_EOF     (1U << 5)
 #define FLAG_UNDERRUN       (1U << 6)   /* Set khi buffer drain hoàn toàn, dùng RESUME_SIZE thay vì PREFILL_SIZE */
 
 static atomic_uint s_flags = 0;
@@ -246,7 +245,7 @@ static void bt_reader_task(void *arg)
         int rd = s_decoder->read(buf, READ_CHUNK_SIZE);
         if (rd <= 0) {
             /* Set FLAG_END_OF_STREAM → a2dp_data_cb biết không còn data mới */
-            bt_flag_set(FLAG_END_OF_STREAM | FLAG_READER_EOF);
+            bt_flag_set(FLAG_END_OF_STREAM);
 
             /* Set FLAG_PREFILLED nếu chưa → cho phép phát nốt data còn trong buffer
              * (cho trường hợp file ngắn hơn PREFILL_SIZE)
@@ -255,11 +254,8 @@ static void bt_reader_task(void *arg)
                 bt_flag_set(FLAG_PREFILLED);
             }
 
-            /* Chờ clear FLAG_READER_EOF */
-            while (!bt_flag_get(FLAG_STOP_READER) && bt_flag_get(FLAG_READER_EOF)) {
-                vTaskDelay(pdMS_TO_TICKS(50));
-            }
-
+            /* Suspend self — bt_audio_seek() hoặc bt_audio_play() sẽ vTaskResume() */
+            vTaskSuspend(NULL);
             continue;
         }
 
@@ -312,6 +308,7 @@ static void bt_stop_reader(void)
     if (!s_reader_task) return;
 
     bt_flag_set(FLAG_STOP_READER);
+    vTaskResume(s_reader_task);   /* wake nếu suspended tại EOF */
     for (int i = 0; i < 10 && s_reader_task; i++)
         vTaskDelay(pdMS_TO_TICKS(10));
 
@@ -999,6 +996,9 @@ esp_err_t bt_audio_play(const char *path)
     ret = bt_init_resource_playback();
     if (ret != ESP_OK) { dec->close(); s_decoder = NULL; return ret; }
 
+    /* Wake reader nếu đang suspended tại EOF của bài trước */
+    if (s_reader_task) vTaskResume(s_reader_task);
+
     /* Buffer đã sẵn sàng → clear FLAG_PAUSED để reader task bắt đầu đọc */
     bt_flag_clear(FLAG_PAUSED);
 
@@ -1052,9 +1052,12 @@ void bt_audio_seek(uint32_t position_ms)
     if (s_decoder->seek(offset) == ESP_OK) {
 
         // Xóa dữ liệu cũ trong stream buffer để tránh phát lại
-        bt_flag_clear(FLAG_PREFILLED | FLAG_END_OF_STREAM | FLAG_READER_EOF);
+        bt_flag_clear(FLAG_PREFILLED | FLAG_END_OF_STREAM);
         xStreamBufferReset(s_stream_buf);
         atomic_store(&s_bytes_played, (uint_fast32_t)offset);
+
+        /* Wake reader nếu đang suspended tại EOF */
+        if (s_reader_task) vTaskResume(s_reader_task);
     }
 
     if (!was_paused) bt_flag_clear(FLAG_PAUSED);
