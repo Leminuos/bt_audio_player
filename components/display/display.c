@@ -2,7 +2,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/semphr.h"
+#include "freertos/queue.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -27,10 +27,20 @@ static void *s_buf2 = NULL;
 static lv_display_t *s_disp = NULL;
 static lv_indev_t *s_indev = NULL;
 static TaskHandle_t s_lvgl_task_handle = NULL;
-static SemaphoreHandle_t s_lvgl_mutex = NULL;
 static esp_timer_handle_t s_tick_timer = NULL;
 static esp_lcd_panel_handle_t s_panel_handle = NULL;
 static esp_lcd_panel_io_handle_t s_io_handle = NULL;
+
+/*--- UI hook queue: replaces mutex, all LVGL access from single task ---*/
+
+typedef struct {
+    display_ui_cb_t cb;
+    void *arg;
+    TaskHandle_t caller;   /* non-NULL → sync: give task notification when done */
+} ui_hook_msg_t;
+
+#define UI_HOOK_QUEUE_SIZE  8
+static QueueHandle_t s_ui_hook_queue = NULL;
 
 /*============================================================================
  * Backlight Control
@@ -351,17 +361,25 @@ static void resolution_changed_event_cb(lv_event_t * e)
 static void lvgl_port_task(void *arg)
 {
     ESP_LOGI(TAG, "Starting LVGL task");
-    uint32_t time_till_next_ms = 0;
+    uint32_t time_till_next_ms = LVGL_TASK_MIN_DELAY_MS;
+    ui_hook_msg_t msg;
+
     while (1) {
-        if (xSemaphoreTake(s_lvgl_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-            time_till_next_ms = lv_timer_handler();
-            xSemaphoreGive(s_lvgl_mutex);
+        /* Block on queue — wakes immediately when a hook is posted,
+         * or after time_till_next_ms for the next lv_timer_handler() call.
+         * This replaces the old vTaskDelay + mutex pattern. */
+        TickType_t wait = pdMS_TO_TICKS(time_till_next_ms);
+
+        while (xQueueReceive(s_ui_hook_queue, &msg, wait) == pdTRUE) {
+            if (msg.cb) msg.cb(msg.arg);
+            if (msg.caller) xTaskNotifyGive(msg.caller);
+            wait = 0;   /* drain remaining hooks without blocking */
         }
-        
+
+        time_till_next_ms = lv_timer_handler();
+
         if (time_till_next_ms < LVGL_TASK_MIN_DELAY_MS) time_till_next_ms = LVGL_TASK_MIN_DELAY_MS;
         if (time_till_next_ms > LVGL_TASK_MAX_DELAY_MS) time_till_next_ms = LVGL_TASK_MAX_DELAY_MS;
-
-        vTaskDelay(pdMS_TO_TICKS(time_till_next_ms));
     }
 }
 
@@ -379,9 +397,9 @@ static esp_err_t display_lvgl_init(void)
     ESP_ERROR_CHECK(esp_timer_create(&lvgl_tick_timer_args, &lvgl_tick_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(lvgl_tick_timer, LVGL_TICK_PERIOD_MS * 1000));
 
-    s_lvgl_mutex = xSemaphoreCreateMutex();
-    if (s_lvgl_mutex == NULL) {
-        ESP_LOGE(TAG, "Failed to create LVGL mutex");
+    s_ui_hook_queue = xQueueCreate(UI_HOOK_QUEUE_SIZE, sizeof(ui_hook_msg_t));
+    if (s_ui_hook_queue == NULL) {
+        ESP_LOGE(TAG, "Failed to create UI hook queue");
         return ESP_FAIL;
     }
 
@@ -454,18 +472,24 @@ static esp_err_t display_lvgl_init(void)
     return ESP_OK;
 }
 
-bool display_port_lock(int timeout_ms)
+bool display_run_on_ui(display_ui_cb_t cb, void *arg)
 {
-    if (s_lvgl_mutex == NULL) return false;
-    TickType_t ticks = (timeout_ms == 0) ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
-    return xSemaphoreTake(s_lvgl_mutex, ticks) == pdTRUE;
+    if (!s_ui_hook_queue || !cb) return false;
+    ui_hook_msg_t msg = { .cb = cb, .arg = arg, .caller = NULL };
+    return xQueueSend(s_ui_hook_queue, &msg, pdMS_TO_TICKS(100)) == pdTRUE;
 }
 
-void display_port_unlock(void)
+bool display_run_on_ui_sync(display_ui_cb_t cb, void *arg)
 {
-    if (s_lvgl_mutex != NULL) {
-        xSemaphoreGive(s_lvgl_mutex);
-    }
+    if (!s_ui_hook_queue || !cb) return false;
+    ui_hook_msg_t msg = {
+        .cb     = cb,
+        .arg    = arg,
+        .caller = xTaskGetCurrentTaskHandle()
+    };
+    if (xQueueSend(s_ui_hook_queue, &msg, portMAX_DELAY) != pdTRUE) return false;
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    return true;
 }
 
 /*============================================================================
@@ -564,11 +588,10 @@ void display_deinit(void)
     spi_bus_free(LCD_HOST);
     spi_bus_free(TOUCH_SPI_HOST);
 
-    /* 10) Xoá mutex cuối cùng
-     *     Vì các bước trên có thể cần mutex (nếu có task khác đang chờ lock) */
-    if (s_lvgl_mutex != NULL) {
-        vSemaphoreDelete(s_lvgl_mutex);
-        s_lvgl_mutex = NULL;
+    /* 10) Xoá hook queue cuối cùng */
+    if (s_ui_hook_queue != NULL) {
+        vQueueDelete(s_ui_hook_queue);
+        s_ui_hook_queue = NULL;
     }
 
     ESP_LOGI(TAG, "Display subsystem deinitialized");

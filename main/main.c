@@ -15,7 +15,7 @@
 static const char* TAG = "main";
 
 #define UI_EVENT_BT_DISCOVERY_DONE      BIT0
-#define UI_EVENT_BT_DEVICE_CONNECTED    BIT1  
+#define UI_EVENT_BT_DEVICE_CONNECTED    BIT1
 #define UI_EVENT_BT_TRACK_FINISHED      BIT3
 #define UI_EVENT_BT_DEVICE_DISCONNECTED BIT4
 #define UI_EVENT_BT_VOLUME_CHANGE       BIT5
@@ -32,69 +32,61 @@ extern void ui_bt_stop_scan(void);
 extern void ui_refresh_file_list(const char *dir_path);
 extern esp_err_t ui_audio_next_track();
 
+/* Runs on LVGL task context — all lv_* calls are thread-safe here */
+static void ui_handle_bt_events(void *arg)
+{
+    EventBits_t bits = (EventBits_t)(uintptr_t)arg;
+
+    if (bits & UI_EVENT_BT_DISCOVERY_DONE) {
+        ui_bt_stop_scan();
+    }
+
+    if (bits & UI_EVENT_BT_DEVICE_CONNECTED) {
+        lv_scr_load_anim(ui_explorer, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+
+        bt_audio_device_info_t info = {0};
+        if (bt_audio_get_device_info(&info) == ESP_OK) {
+            lv_label_set_text_fmt(ui_ExplorerLabel, "Connected to: %s", info.name);
+            ESP_LOGI(TAG, "Connected to: %s (%s)", info.name, info.bda_str);
+        }
+
+        ui_refresh_file_list("/sdcard");
+    }
+
+    if (bits & UI_EVENT_BT_TRACK_FINISHED) {
+        if (ui_is_loop) bt_audio_seek(0);
+        else {
+            if (ui_audio_next_track() != ESP_OK) {
+                ui_is_finish  = true;
+                ui_is_playing = false;
+                lv_label_set_text(ui_lblBtnPlayPause, LV_SYMBOL_PLAY);
+            }
+        }
+    }
+
+    if (bits & UI_EVENT_BT_DEVICE_DISCONNECTED) {
+        ui_bt_start_scan();
+        lv_scr_load_anim(ui_bt_select, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
+    }
+
+    if (bits & UI_EVENT_BT_VOLUME_CHANGE) {
+        uint8_t vol = bt_audio_get_volume();
+        lv_slider_set_value(ui_sliderVolume, vol, LV_ANIM_OFF);
+    }
+}
+
 static void ui_audio_task(void* param)
 {
     (void) param;
-    EventBits_t bits = 0;
 
     for ( ; ; ) {
-        bits = xEventGroupWaitBits(s_audio_event_group,
+        EventBits_t bits = xEventGroupWaitBits(s_audio_event_group,
                                   UI_EVENT_BT_ALL,
                                   pdTRUE,
                                   pdFALSE,
                                   portMAX_DELAY);
 
-        if (bits & UI_EVENT_BT_DISCOVERY_DONE) {
-            if (display_port_lock(100)) {
-                ui_bt_stop_scan();
-                display_port_unlock();
-            }
-        }
-
-        if (bits & UI_EVENT_BT_DEVICE_CONNECTED) {
-            if (display_port_lock(100)) {
-                lv_scr_load_anim(ui_explorer, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
-
-                bt_audio_device_info_t info = {0};
-                if (bt_audio_get_device_info(&info) == ESP_OK) {
-                    lv_label_set_text_fmt(ui_ExplorerLabel, "Connected to: %s", info.name);
-                    ESP_LOGI(TAG, "Connected to: %s (%s)", info.name, info.bda_str);
-                }
-
-                ui_refresh_file_list("/sdcard");
-                display_port_unlock();
-            }
-        }
-
-        if (bits & UI_EVENT_BT_TRACK_FINISHED) {
-            if (ui_is_loop) bt_audio_seek(0);
-            else {
-                if (display_port_lock(100)) {
-                    if (ui_audio_next_track() != ESP_OK) {
-                        ui_is_finish  = true;
-                        ui_is_playing = false;
-                        lv_label_set_text(ui_lblBtnPlayPause, LV_SYMBOL_PLAY);
-                    }
-                    display_port_unlock();
-                }
-            }
-        }
-
-        if (bits & UI_EVENT_BT_DEVICE_DISCONNECTED) {
-            if (display_port_lock(100)) {
-                ui_bt_start_scan();
-                lv_scr_load_anim(ui_bt_select, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
-                display_port_unlock();
-            }
-        }
-
-        if (bits & UI_EVENT_BT_VOLUME_CHANGE) {
-            if (display_port_lock(100)) {
-                uint8_t vol = bt_audio_get_volume();
-                lv_slider_set_value(ui_sliderVolume, vol, LV_ANIM_OFF);
-                display_port_unlock();
-            }
-        }
+        display_run_on_ui(ui_handle_bt_events, (void *)(uintptr_t)bits);
     }
 }
 
@@ -130,7 +122,7 @@ static void on_bt_event(const bt_audio_event_t *evt)
         }
         break;
     }
-    
+
     case BT_AUDIO_EVT_TRACK_FINISHED:
         xEventGroupSetBits(s_audio_event_group, UI_EVENT_BT_TRACK_FINISHED);
         break;
@@ -144,6 +136,12 @@ static void on_bt_event(const bt_audio_event_t *evt)
     }
 }
 
+static void ui_startup_hook(void *arg)
+{
+    ui_init();
+    ui_bt_start_scan();
+}
+
 void app_main(void)
 {
     s_audio_event_group = xEventGroupCreate();
@@ -154,11 +152,5 @@ void app_main(void)
 
     xTaskCreatePinnedToCore(ui_audio_task, "audio_task", 4096, NULL, 6, &s_audio_task, 1);
 
-    if (display_port_lock(0)) {
-        ui_init();
-        ui_bt_start_scan();
-        display_port_unlock();
-    } else {
-        ESP_LOGE("app", "Failed to lock LVGL for screen creation");
-    }
+    display_run_on_ui_sync(ui_startup_hook, NULL);
 }

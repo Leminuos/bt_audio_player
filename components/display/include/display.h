@@ -25,15 +25,32 @@ esp_err_t display_init(void);
  */
 void display_deinit(void);
 
-/**
- * @brief Lock LVGL mutex
- */
-bool display_port_lock(int timeout_ms);
+/*============================================================================
+ * UI Hook API — execute callbacks on the LVGL task
+ *
+ * All LVGL API calls MUST happen on the LVGL task. Use these functions to
+ * schedule work from any other task. Callbacks execute in lvgl_port_task
+ * context, so no mutex is needed.
+ *============================================================================*/
+
+typedef void (*display_ui_cb_t)(void *arg);
 
 /**
- * @brief Unlock LVGL mutex
+ * @brief Post a callback to run on the LVGL task (async, fire-and-forget)
+ * @return true if posted successfully
  */
-void display_port_unlock(void);
+bool display_run_on_ui(display_ui_cb_t cb, void *arg);
+
+/**
+ * @brief Post a callback and block until it completes on the LVGL task
+ * @note  Must NOT be called from the LVGL task itself (deadlock).
+ * @return true if executed successfully
+ */
+bool display_run_on_ui_sync(display_ui_cb_t cb, void *arg);
+
+/*============================================================================
+ * Backlight
+ *============================================================================*/
 
 /**
  * @brief Set backlight percent
