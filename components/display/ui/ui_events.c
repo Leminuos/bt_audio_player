@@ -53,6 +53,10 @@ void cb_btn_next(lv_event_t *e) {
 void cb_btn_loop(lv_event_t *e) {
     ui_is_loop = !ui_is_loop;
 
+    /* Sync vào bt_audio — loop được xử lý nội bộ trong data_cb,
+     * không còn đi qua event chain → zero round-trip */
+    bt_audio_set_loop(ui_is_loop);
+
     if (ui_is_loop) {
         lv_obj_set_style_text_opa(lbl_loop, LV_OPA_COVER, 0);
         lv_obj_set_style_text_color(lbl_loop, lv_color_hex(0x4FC3F7), 0);

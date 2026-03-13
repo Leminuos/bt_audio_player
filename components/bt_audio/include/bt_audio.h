@@ -180,6 +180,14 @@ void      bt_audio_resume(void);
 void      bt_audio_stop(void);
 void      bt_audio_seek(uint32_t position_ms);
 
+/**
+ * @brief Bật/tắt chế độ loop.
+ *
+ * Khi loop=true và track kết thúc, data_cb tự seek(0) và wake reader
+ * mà không fire BT_AUDIO_EVT_TRACK_FINISHED — không có event chain round-trip.
+ */
+void      bt_audio_set_loop(bool enable);
+
 void      bt_audio_set_volume(uint8_t volume_pct);
 uint8_t   bt_audio_get_volume(void);
 

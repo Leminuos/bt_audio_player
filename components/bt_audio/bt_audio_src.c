@@ -46,6 +46,14 @@ static const char *TAG = "bt_audio";
 #define FLAG_END_OF_STREAM  (1U << 4)
 #define FLAG_UNDERRUN       (1U << 6)   /* Set khi buffer drain hoàn toàn, dùng RESUME_SIZE thay vì PREFILL_SIZE */
 
+/* ─── Reader flush signal ─────────────────────────────────────────────────
+ * Set bởi bt_audio_play() TRƯỚC khi vTaskSuspend(s_reader_task).
+ * Reader check flag này trong write loop để thoát ngay, tránh ghi
+ * stale data vào buffer đã bị reset.
+ * Reader tự clear ở đầu mỗi iteration của vòng lặp chính.
+ * ─────────────────────────────────────────────────────────────────────── */
+static volatile bool s_reader_flush = false;
+
 static atomic_uint s_flags = 0;
 static inline bool bt_flag_get(uint32_t mask) { return (atomic_load(&s_flags) & mask) != 0; }
 static inline void bt_flag_set(uint32_t mask) { atomic_fetch_or(&s_flags, mask); }
@@ -53,6 +61,7 @@ static inline void bt_flag_clear(uint32_t mask) { atomic_fetch_and(&s_flags, ~ma
 
 /* ─── State ──────────────────────────────────────────────────────────────── */
 
+static bool                         s_loop          = false;
 static bool                         s_auto_connect  = false;
 static bool                         s_audio_start   = false;
 static atomic_uint_fast32_t         s_bytes_played  = 0;
@@ -235,41 +244,43 @@ static void bt_reader_task(void *arg)
     if (!buf) goto exit;
 
     while (!bt_flag_get(FLAG_STOP_READER)) {
+        /* Xoá flush signal ở đầu mỗi iteration — acknowledge yêu cầu từ bt_audio_play() */
+        s_reader_flush = false;
+
         /* Pause: chờ resume, không đọc file */
         if (bt_flag_get(FLAG_PAUSED)) {
-            vTaskDelay(pdMS_TO_TICKS(50));
+            vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
 
         /* Gọi decoder đọc PCM data */
         int rd = s_decoder->read(buf, READ_CHUNK_SIZE);
         if (rd <= 0) {
-            /* Set FLAG_END_OF_STREAM → a2dp_data_cb biết không còn data mới */
-            bt_flag_set(FLAG_END_OF_STREAM);
+            /* Đảm bảo file ngắn hơn PREFILL_SIZE vẫn được phát hết */
+            if (!bt_flag_get(FLAG_PREFILLED)) bt_flag_set(FLAG_PREFILLED);
 
-            /* Set FLAG_PREFILLED nếu chưa → cho phép phát nốt data còn trong buffer
-             * (cho trường hợp file ngắn hơn PREFILL_SIZE)
+            /* Báo hiệu hết data — a2dp_data_cb sẽ drain buffer rồi xử lý tiếp:
+             *   - loop mode:  data_cb seek(0) + vTaskResume → reader tiếp tục
+             *   - no loop:    data_cb fire TRACK_FINISHED + reader ở đây cho đến
+             *                 khi bt_audio_play / bt_audio_seek gọi vTaskResume
              */
-            if (!bt_flag_get(FLAG_PREFILLED) && s_stream_buf) {
-                bt_flag_set(FLAG_PREFILLED);
-            }
-
-            /* Suspend self — bt_audio_seek() hoặc bt_audio_play() sẽ vTaskResume() */
+            bt_flag_set(FLAG_END_OF_STREAM);
             vTaskSuspend(NULL);
             continue;
         }
 
-        /* Ghi vào stream buffer, retry nếu buffer đầy */
+        /* Ghi vào stream buffer.
+         * Thoát sớm nếu s_reader_flush được set bởi bt_audio_play() — tránh ghi
+         * stale data vào buffer đã được reset trong khi task bị vTaskSuspend. */
         size_t offset = 0;
-        while (offset < (size_t)rd && !bt_flag_get(FLAG_STOP_READER)) {
-            size_t written = xStreamBufferSend( s_stream_buf,
-                                                buf + offset,
-                                                (size_t)rd - offset,
-                                                100 );
-
+        while (offset < (size_t)rd && !bt_flag_get(FLAG_STOP_READER) && !s_reader_flush) {
+            size_t written = xStreamBufferSend(s_stream_buf,
+                                               buf + offset,
+                                               (size_t)rd - offset,
+                                               pdMS_TO_TICKS(10));
             offset += written;
 
-            if (!bt_flag_get(FLAG_PREFILLED) && s_stream_buf) {
+            if (!bt_flag_get(FLAG_PREFILLED)) {
                 /* Sau underrun dùng RESUME_SIZE nhỏ để giảm khoảng lặng,
                  * lần đầu khởi động dùng PREFILL_SIZE để tránh underrun ngay từ đầu */
                 size_t threshold = bt_flag_get(FLAG_UNDERRUN) ? RESUME_SIZE : PREFILL_SIZE;
@@ -423,10 +434,29 @@ static int32_t bt_audio_a2dp_data_cb(uint8_t *out, int32_t len)
     /* Apply software volume */
     bt_apply_volume(out, (size_t)len, s_volume);
 
-    /* Check end of stream */
+    /* Check end of stream — stream buffer vừa cạn, không còn data mới từ reader.
+     *
+     * Loop mode: data_cb xử lý trực tiếp (không qua event chain → zero round-trip):
+     *   1. seek(0) — fseek nhanh, không block
+     *   2. xStreamBufferReset — safe: reader đang suspended, data_cb là consumer duy nhất
+     *   3. vTaskResume(reader) — reader bắt đầu fill lại từ đầu file
+     *   Gap = thời gian fill RESUME_SIZE (4KB ≈ 23ms) thay vì ~200ms cũ
+     *
+     * No loop: fire TRACK_FINISHED → UI xử lý (next track hoặc stop)
+     */
     if ((flags & FLAG_END_OF_STREAM) && xStreamBufferBytesAvailable(s_stream_buf) == 0) {
         bt_flag_clear(FLAG_END_OF_STREAM);
-        bt_notify_signal(BT_AUDIO_EVT_TRACK_FINISHED);
+
+        if (s_loop && s_reader_task && s_decoder && s_decoder->seek) {
+            s_decoder->seek(0);
+            xStreamBufferReset(s_stream_buf);
+            atomic_store(&s_bytes_played, 0);
+            bt_flag_clear(FLAG_PREFILLED);
+            bt_flag_set(FLAG_UNDERRUN);     /* dùng RESUME_SIZE cho restart nhanh */
+            vTaskResume(s_reader_task);
+        } else {
+            bt_notify_signal(BT_AUDIO_EVT_TRACK_FINISHED);
+        }
     }
 
     return len;
@@ -969,43 +999,53 @@ esp_err_t bt_audio_play(const char *path)
     if (!path) return ESP_ERR_INVALID_ARG;
     if (!s_device.connected) return ESP_ERR_INVALID_STATE;
 
-    /* Tạm thời pause bài đang phát (nếu có) trước khi play bài mới */
-    if (s_audio_start && s_decoder) bt_flag_set(FLAG_PAUSED);
-
-    /* Tìm decoder phù hợp với extension của file. Ví dụ: *.wav, *.raw,... */
+    /* Tìm decoder */
     const bt_audio_decoder_t *dec = bt_find_decoder(path);
     if (!dec) {
         ESP_LOGE(TAG, "No decoder for '%s'", path);
         return ESP_ERR_NOT_SUPPORTED;
     }
 
-    /* Open file và lấy thông tin như kích thước pcm, sample rate,
-     * số channel, một sample chứa bao nhiêu bit
-     */
+    /* Mở file mới trước — nếu fail thì không cần dừng reader */
     esp_err_t ret = dec->open(path, &s_file_info);
     if (ret != ESP_OK) return ret;
 
-    /* Setup state cho playback mới.
-     * Giữ FLAG_PAUSED = 1 trong khi reset buffer để tránh reader task write vào buffer
-     * đang bị xStreamBufferReset() → undefined behavior theo FreeRTOS docs.
-     */
+    /* Dừng reader ngay lập tức bằng vTaskSuspend — không cần chờ flag polling.
+     * Đặt FLAG_PAUSED TRƯỚC để data_cb ngừng đọc stream buffer (output silence),
+     * bảo vệ xStreamBufferReset bên dưới khỏi concurrent access. */
+    bt_flag_set(FLAG_PAUSED);
+    if (s_reader_task) vTaskSuspend(s_reader_task);
+
+    /* Đóng decoder cũ nếu khác loại (cùng loại thì open() đã đóng file cũ) */
+    if (s_decoder && s_decoder != dec) s_decoder->close();
     s_decoder = dec;
+
+    /* Reset state.
+     * FLAG_PAUSED: bảo vệ stream buffer (data_cb output silence, không đọc buffer).
+     * FLAG_UNDERRUN: dùng RESUME_SIZE (4KB ≈ 23ms) thay vì PREFILL_SIZE (32KB ≈ 182ms)
+     *   cho track switch — giảm khoảng silence xuống tối thiểu. */
     atomic_store(&s_bytes_played, 0);
-    atomic_store(&s_flags, FLAG_PAUSED);
+    atomic_store(&s_flags, FLAG_PAUSED | FLAG_UNDERRUN);
 
+    /* Reset stream buffer — safe vì: reader suspended, data_cb thấy FLAG_PAUSED */
     ret = bt_init_resource_playback();
-    if (ret != ESP_OK) { dec->close(); s_decoder = NULL; return ret; }
+    if (ret != ESP_OK) { s_decoder = NULL; return ret; }
 
-    /* Wake reader nếu đang suspended tại EOF của bài trước */
-    if (s_reader_task) vTaskResume(s_reader_task);
+    /* Arm flush signal: khi reader resume từ vị trí giữa write loop,
+     * nó sẽ thoát write loop ngay (tránh ghi stale data vào buffer vừa reset),
+     * rồi self-clear ở đầu iteration tiếp theo. */
+    s_reader_flush = true;
 
-    /* Buffer đã sẵn sàng → clear FLAG_PAUSED để reader task bắt đầu đọc */
+    /* Unblock data_cb trước, rồi wake reader — thứ tự này đảm bảo
+     * data_cb thấy PREFILLED=0 (output silence) trước khi reader bắt đầu fill */
     bt_flag_clear(FLAG_PAUSED);
+    vTaskResume(s_reader_task);
 
-    /* Gửi lệnh media ctrl start đến BT Stack để bắt đầu gửi data PCM */
+    /* Gửi lệnh media ctrl start đến BT Stack nếu chưa streaming */
     if (!s_audio_start) esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
 
-    ESP_LOGI(TAG, "Play [%s]: '%s' (%.1fs)", dec->name, path, s_file_info.total_pcm_bytes ? (float)s_file_info.total_pcm_bytes / BT_AUDIO_BITRATE : 0.0f);
+    ESP_LOGI(TAG, "Play [%s]: '%s' (%.1fs)", dec->name, path,
+             s_file_info.total_pcm_bytes ? (float)s_file_info.total_pcm_bytes / BT_AUDIO_BITRATE : 0.0f);
 
     return ESP_OK;
 }
@@ -1074,6 +1114,11 @@ esp_err_t bt_audio_get_position(bt_audio_playback_pos_t *pos)
     pos->progress_pct = s_file_info.total_pcm_bytes ? (uint8_t)((uint64_t)played * 100 / s_file_info.total_pcm_bytes) : 0;
 
     return ESP_OK;
+}
+
+void bt_audio_set_loop(bool enable)
+{
+    s_loop = enable;
 }
 
 void bt_audio_set_volume(uint8_t volume_pct)

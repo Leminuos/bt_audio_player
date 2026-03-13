@@ -54,13 +54,12 @@ static void ui_handle_bt_events(void *arg)
     }
 
     if (bits & UI_EVENT_BT_TRACK_FINISHED) {
-        if (ui_is_loop) bt_audio_seek(0);
-        else {
-            if (ui_audio_next_track() != ESP_OK) {
-                ui_is_finish  = true;
-                ui_is_playing = false;
-                lv_label_set_text(ui_lblBtnPlayPause, LV_SYMBOL_PLAY);
-            }
+        /* Loop được xử lý nội bộ bởi bt_audio (data_cb seek+wake reader).
+         * Event này chỉ fire khi loop=false → chuyển bài tiếp hoặc dừng. */
+        if (ui_audio_next_track() != ESP_OK) {
+            ui_is_finish  = true;
+            ui_is_playing = false;
+            lv_label_set_text(ui_lblBtnPlayPause, LV_SYMBOL_PLAY);
         }
     }
 

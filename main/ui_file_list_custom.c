@@ -240,6 +240,7 @@ static void cb_file_item_clicked(lv_event_t *e) {
 
     // Cập nhật UI player
     ui_is_loop = false;
+    bt_audio_set_loop(false);   /* reset loop state trong bt_audio khi chọn bài mới */
     ui_refresh_player(entry);
 
     ui_player_start_update();
