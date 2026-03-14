@@ -85,7 +85,7 @@ static void ui_audio_task(void* param)
         if (bits & UI_EVENT_BT_VOLUME_CHANGE) {
             if (display_port_lock(100)) {
                 uint8_t vol = bt_audio_get_volume();
-                lv_slider_set_value(ui_sliderVolume, vol, LV_ANIM_ON);
+                lv_slider_set_value(ui_sliderVolume, vol, LV_ANIM_OFF);
                 display_port_unlock();
             }
         }
