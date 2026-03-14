@@ -224,3 +224,11 @@ esp_err_t bt_audio_connect(const uint8_t bda[6])
     return esp_a2d_source_connect((uint8_t *)bda);
 }
 ```
+
+> **Commit: "Wrap missing display_port_lock() calls"**
+
+Có hai vị trí trong `ui_audio_task` đã gọi các hàm API của LVGL mà không có look, khả năng tạo ra race condition với `lvgl_task` và làm corrupt state của LVGL:
+- `UI_EVENT_BT_DEVICE_DISCONNECTED`
+- `UI_EVENT_BT_TRACK_FINISHED`
+
+Ngoài ra, chuyển `s_lvgl_mutex` từ mutex thành recursive mutex để tránh vấn đề gọi `s_lvgl_mutex` hai lần từ cùng một task.

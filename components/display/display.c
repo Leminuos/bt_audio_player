@@ -353,9 +353,9 @@ static void lvgl_port_task(void *arg)
     ESP_LOGI(TAG, "Starting LVGL task");
     uint32_t time_till_next_ms = 0;
     while (1) {
-        if (xSemaphoreTake(s_lvgl_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        if (display_port_lock(0)) {
             time_till_next_ms = lv_timer_handler();
-            xSemaphoreGive(s_lvgl_mutex);
+            display_port_unlock();
         }
         
         if (time_till_next_ms < LVGL_TASK_MIN_DELAY_MS) time_till_next_ms = LVGL_TASK_MIN_DELAY_MS;
@@ -379,7 +379,7 @@ static esp_err_t display_lvgl_init(void)
     ESP_ERROR_CHECK(esp_timer_create(&lvgl_tick_timer_args, &lvgl_tick_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(lvgl_tick_timer, LVGL_TICK_PERIOD_MS * 1000));
 
-    s_lvgl_mutex = xSemaphoreCreateMutex();
+    s_lvgl_mutex = xSemaphoreCreateRecursiveMutex();
     if (s_lvgl_mutex == NULL) {
         ESP_LOGE(TAG, "Failed to create LVGL mutex");
         return ESP_FAIL;
@@ -458,13 +458,13 @@ bool display_port_lock(int timeout_ms)
 {
     if (s_lvgl_mutex == NULL) return false;
     TickType_t ticks = (timeout_ms == 0) ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
-    return xSemaphoreTake(s_lvgl_mutex, ticks) == pdTRUE;
+    return xSemaphoreTakeRecursive(s_lvgl_mutex, ticks) == pdTRUE;
 }
 
 void display_port_unlock(void)
 {
     if (s_lvgl_mutex != NULL) {
-        xSemaphoreGive(s_lvgl_mutex);
+        xSemaphoreGiveRecursive(s_lvgl_mutex);
     }
 }
 

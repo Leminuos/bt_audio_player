@@ -54,13 +54,6 @@ static void ui_audio_task(void* param)
         if (bits & UI_EVENT_BT_DEVICE_CONNECTED) {
             if (display_port_lock(100)) {
                 lv_scr_load_anim(ui_explorer, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
-
-                bt_audio_device_info_t info = {0};
-                if (bt_audio_get_device_info(&info) == ESP_OK) {
-                    lv_label_set_text_fmt(ui_ExplorerLabel, "Connected to: %s", info.name);
-                    ESP_LOGI(TAG, "Connected to: %s (%s)", info.name, info.bda_str);
-                }
-
                 ui_refresh_file_list("/sdcard");
                 display_port_unlock();
             }
@@ -69,21 +62,21 @@ static void ui_audio_task(void* param)
         if (bits & UI_EVENT_BT_TRACK_FINISHED) {
             if (ui_is_loop) bt_audio_seek(0);
             else {
-                if (ui_audio_next_track() != ESP_OK) {
-                    if (display_port_lock(100)) {
+                if (display_port_lock(100)) {
+                    if (ui_audio_next_track() != ESP_OK) {
                         ui_is_finish  = true;
                         ui_is_playing = false;
                         lv_label_set_text(ui_lblBtnPlayPause, LV_SYMBOL_PLAY);
-                        display_port_unlock();
                     }
+
+                    display_port_unlock();
                 }
             }
         }
 
         if (bits & UI_EVENT_BT_DEVICE_DISCONNECTED) {
-            ui_bt_start_scan();
-            
             if (display_port_lock(100)) {
+                ui_bt_start_scan();
                 lv_scr_load_anim(ui_bt_select, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
                 display_port_unlock();
             }
@@ -112,6 +105,12 @@ static void on_bt_event(const bt_audio_event_t *evt)
             break;
 
         case BT_AUDIO_STATE_CONNECTED: {
+            bt_audio_device_info_t info = {0};
+            if (bt_audio_get_device_info(&info) == ESP_OK) {
+                lv_label_set_text_fmt(ui_ExplorerLabel, "Connected to: %s", info.name);
+                ESP_LOGI(TAG, "Connected to: %s (%s)", info.name, info.bda_str);
+            }
+
             xEventGroupSetBits(s_audio_event_group, UI_EVENT_BT_DEVICE_CONNECTED);
             break;
         }
