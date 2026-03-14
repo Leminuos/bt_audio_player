@@ -312,16 +312,16 @@ static esp_err_t bt_init_resource_playback(void) {
     /* Tạo streambuffer để truyền nhận dữ liệu realtime giữa consumer và provider */
     StreamBufferHandle_t buf = xStreamBufferCreate(BUF_SIZE, BT_AUDIO_FRAME_SIZE);
     if (!buf) return ESP_ERR_NO_MEM;
+    s_stream_buf = buf;
 
     /* Tạo reader task — bắt đầu đọc file */
     if (xTaskCreatePinnedToCore(bt_reader_task, "reader_task",
                                 READER_TASK_STACK, NULL,
                                 READER_TASK_PRIO, &s_reader_task, 1) != pdPASS) {
-        vStreamBufferDelete(buf);
+        vStreamBufferDelete(s_stream_buf);
+        s_stream_buf = NULL;
         return ESP_ERR_NO_MEM;
     }
-
-    s_stream_buf = buf;
 
     return ESP_OK;
 }
@@ -951,7 +951,13 @@ esp_err_t bt_audio_play(const char *path)
     if (!s_device.connected) return ESP_ERR_INVALID_STATE;
 
     /* Tạm thời pause bài đang phát (nếu có) trước khi play bài mới */
-    if (s_audio_start && s_decoder) bt_flag_set(FLAG_PAUSED);
+    if (s_audio_start && s_decoder) {
+        bt_flag_set(FLAG_PAUSED);
+
+        // Thêm một khoảng delay để reader task thực sự pause.
+        vTaskDelay(pdMS_TO_TICKS(60));
+        s_decoder->close(); s_decoder = NULL;
+    }
 
     /* Tìm decoder phù hợp với extension của file. Ví dụ: *.wav, *.raw,... */
     const bt_audio_decoder_t *dec = bt_find_decoder(path);
@@ -969,10 +975,12 @@ esp_err_t bt_audio_play(const char *path)
     /* Setup state cho playback mới */
     s_decoder = dec;
     atomic_store(&s_bytes_played, 0);
-    atomic_store(&s_flags, 0);
+    atomic_store(&s_flags, FLAG_PAUSED);
 
     ret = bt_init_resource_playback();
     if (ret != ESP_OK) { dec->close(); s_decoder = NULL; return ret; }
+
+    bt_flag_clear(FLAG_PAUSED);
 
     /* Gửi lệnh media ctrl start đến BT Stack để bắt đầu gửi data PCM */
     if (!s_audio_start) esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
