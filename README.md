@@ -232,3 +232,9 @@ Có hai vị trí trong `ui_audio_task` đã gọi các hàm API của LVGL mà 
 - `UI_EVENT_BT_TRACK_FINISHED`
 
 Ngoài ra, chuyển `s_lvgl_mutex` từ mutex thành recursive mutex để tránh vấn đề gọi `s_lvgl_mutex` hai lần từ cùng một task.
+
+> **Commit: "Race condition in bt_init_resource_playback()"**
+
+**Nguyên nhân:** Biến `s_stream_buf` được gán giá trị sau khi gọi hàm `xTaskCreatePinnedToCore()`. Điều này có thể dẫn đến việc reader task có thể bắt đầu chạy trong khi stream buffer vẫn đang ở trạng thái `NULL`.
+
+**Giải pháp:** Thực hiện gán giá trị cho `s_stream_buf` trước khi tạo tác vụ.
