@@ -304,11 +304,8 @@ static void bt_stop_reader(void)
 }
 
 static esp_err_t bt_init_resource_playback(void) {
-    if (s_reader_task && s_stream_buf) {
-        xStreamBufferReset(s_stream_buf);
-        return ESP_OK;
-    }
-    
+    if (s_audio_start) return ESP_OK;
+
     /* Tạo streambuffer để truyền nhận dữ liệu realtime giữa consumer và provider */
     StreamBufferHandle_t buf = xStreamBufferCreate(BUF_SIZE, BT_AUDIO_FRAME_SIZE);
     if (!buf) return ESP_ERR_NO_MEM;
@@ -454,9 +451,12 @@ static void bt_audio_a2dp_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param
         switch (param->audio_stat.state) {
         case ESP_A2D_AUDIO_STATE_STARTED:
             /* BT sink accept stream → bắt đầu phát */
-            ESP_LOGI(TAG, "Audio stream started");
+            esp_err_t ret = bt_init_resource_playback();
+            if (ret != ESP_OK) break;
+
             s_audio_start = true;
             bt_set_state(BT_AUDIO_STATE_PLAYING);
+            ESP_LOGI(TAG, "Audio stream started");
             break;
 
         case ESP_A2D_AUDIO_STATE_STOPPED:
@@ -951,12 +951,13 @@ esp_err_t bt_audio_play(const char *path)
     if (!s_device.connected) return ESP_ERR_INVALID_STATE;
 
     /* Tạm thời pause bài đang phát (nếu có) trước khi play bài mới */
-    if (s_audio_start && s_decoder) {
+    if (s_audio_start) {
         bt_flag_set(FLAG_PAUSED);
 
         // Thêm một khoảng delay để reader task thực sự pause.
         vTaskDelay(pdMS_TO_TICKS(60));
-        s_decoder->close(); s_decoder = NULL;
+        if (s_decoder) { s_decoder->close(); s_decoder = NULL; }
+        xStreamBufferReset(s_stream_buf);
     }
 
     /* Tìm decoder phù hợp với extension của file. Ví dụ: *.wav, *.raw,... */
@@ -976,9 +977,6 @@ esp_err_t bt_audio_play(const char *path)
     s_decoder = dec;
     atomic_store(&s_bytes_played, 0);
     atomic_store(&s_flags, 0);
-
-    ret = bt_init_resource_playback();
-    if (ret != ESP_OK) { dec->close(); s_decoder = NULL; return ret; }
 
     /* Gửi lệnh media ctrl start đến BT Stack để bắt đầu gửi data PCM */
     if (!s_audio_start) esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
