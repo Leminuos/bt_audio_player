@@ -6,7 +6,9 @@
 #include "sdcard.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "bt_audio.h"
+#include "sys_monitor.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -16,13 +18,15 @@ static const char* TAG = "main";
 
 #define UI_EVENT_BT_DISCOVERY_DONE      BIT0
 #define UI_EVENT_BT_DEVICE_CONNECTED    BIT1  
+#define UI_EVENT_BT_CLOCK_TICK          BIT2
 #define UI_EVENT_BT_TRACK_FINISHED      BIT3
 #define UI_EVENT_BT_DEVICE_DISCONNECTED BIT4
 #define UI_EVENT_BT_VOLUME_CHANGE       BIT5
-#define UI_EVENT_BT_ALL                 BIT0 | BIT1 | BIT3 | BIT4 | BIT5
+#define UI_EVENT_BT_ALL                 BIT0 | BIT1 | BIT2 | BIT3 | BIT4 | BIT5
 
-static EventGroupHandle_t s_audio_event_group;
 static TaskHandle_t s_audio_task;
+static EventGroupHandle_t s_audio_event_group;
+static esp_timer_handle_t s_clock_timer_handle;
 
 extern bool ui_is_loop;
 extern bool ui_is_finish;
@@ -36,6 +40,7 @@ static void ui_audio_task(void* param)
 {
     (void) param;
     EventBits_t bits = 0;
+    static int clock_ticks = 0;
 
     for ( ; ; ) {
         bits = xEventGroupWaitBits(s_audio_event_group,
@@ -56,6 +61,15 @@ static void ui_audio_task(void* param)
                 lv_scr_load_anim(ui_explorer, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
                 ui_refresh_file_list("/sdcard");
                 display_port_unlock();
+            }
+        }
+
+        if (bits &  UI_EVENT_BT_CLOCK_TICK) {
+            ++clock_ticks;
+
+            // Print debug info every 10 seconds
+            if (clock_ticks % 10 == 0) {
+                sys_monitor_print_heap();
             }
         }
 
@@ -144,8 +158,24 @@ static void on_bt_event(const bt_audio_event_t *evt)
     }
 }
 
+static void clock_timer_callback(void* arg)
+{
+    (void) arg;
+    xEventGroupSetBits(s_audio_event_group, UI_EVENT_BT_CLOCK_TICK);
+}
+
 void app_main(void)
 {
+    esp_timer_create_args_t clock_timer_args = {
+        .callback = clock_timer_callback,
+        .arg = NULL,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "clock_timer",
+        .skip_unhandled_events = true
+    };
+    esp_timer_create(&clock_timer_args, &s_clock_timer_handle);
+    esp_timer_start_periodic(s_clock_timer_handle, 1000000);
+
     s_audio_event_group = xEventGroupCreate();
     bt_audio_init("esp32_player");
     bt_audio_register_callback(on_bt_event);

@@ -11,4 +11,5 @@ idf_component_register(
         "display"
         "bt_audio"
         "sdcard"
+        "sys_monitor"
 )
